@@ -1,0 +1,99 @@
+# CLAUDE.md - {논문 슬러그}
+
+> **이 파일이 hub.** 모든 산출물·계획은 이 파일에서 링크로 진입.
+> Claude Code가 폴더 진입 시 자동 로드. 새 산출물 생기면 이 파일에 링크 추가.
+
+---
+
+## 프로젝트 개요
+
+| 항목 | 내용 |
+|------|------|
+| **제목** | {논문 제목} |
+| **저널** | {타겟 저널} |
+| **1저자** | {1저자명} |
+| **현재 상태** | {아이디어 / 초고작성 / 투고준비 등} — `_paper.md`에서 SSOT |
+| **다음 액션** | {1줄로 다음 할 일} |
+
+> **YAML 트래커**: [`_paper.md`](./_paper.md) (대시보드 dataview 소스)
+
+---
+
+## 폴더 구조
+
+표준 6폴더 + 2메타 — 자세한 규칙은 `paper-autopilot` plugin의 `references/folder-standard.md` 참조
+
+```
+input/             ← 사용자 RAW 데이터 + figure 가안
+reference/         ← 참고 논문 + metadata + 차용 logic
+simulations/       ← 사용자 시뮬레이션 결과 데이터
+mockup/            ← storyline + figure 가안 (iteration)
+experimental_plan/ ← 학부생 수준 실험 SOP (iteration)
+output/            ← manuscript md/docx + 최종 figures
+```
+
+---
+
+## 작업 규칙
+
+### 논문 작업 시
+- **최신본**: `output/{최신날짜폴더}/manuscript.md`
+- **그림 참조**: `output/figures/{최신날짜폴더}/`
+- **학술 영어**: 객관적·간결, [`paper-autopilot/references/style-guide.md`](../../references/style-guide.md) 준수
+
+### 데이터 분석 시
+- 원본 데이터: `input/` 보존
+- 분석 결과: `simulations/_execution/` 또는 `mockup/`
+
+### 그림 작업 시
+- Mockup 단계: `mockup/{날짜}/` — 자유 iteration
+- 최종 단계: `output/figures/{날짜}/` — 300 DPI 이상
+
+### 실험 계획 시
+- `experimental_plan/{날짜}/SOP.md` (학부생 수준)
+- 출처는 항상 명시 (RAG corpus / OA paper)
+
+### 시간대
+모든 시간은 config timezone 기준 (기본 Asia/Seoul, UTC+9)
+
+---
+
+## 핵심 링크 (paper-autopilot이 자동 갱신)
+
+### 데이터
+- 최근 input: TBD
+- 전체 input 히스토리: [./input/](./input/)
+
+### 참고 논문
+- 전체 reference: [./reference/](./reference/)
+
+### 계산 진행
+- MASTER_PLAN: [./simulations/MASTER_PLAN.md](./simulations/MASTER_PLAN.md)
+- 현재 상태: [./simulations/_execution/status.yaml](./simulations/_execution/status.yaml)
+
+### Storyline
+- 최신 mockup: TBD
+- 전체 mockup 히스토리: [./mockup/](./mockup/)
+
+### 실험 계획
+- 최신 SOP: TBD
+- 전체 experimental_plan 히스토리: [./experimental_plan/](./experimental_plan/)
+
+### Manuscript
+- 최신 본문: TBD
+- 최신 Figure set: TBD
+- 전체 output 히스토리: [./output/](./output/)
+
+---
+
+## 현재 블로커
+
+- [ ] (없음)
+
+---
+
+## 변경 이력
+
+| 날짜 | 변경 | 액터 |
+|------|------|------|
+| {TODAY} | 폴더 초기화 (folder-scaffold v1.0) | paper-autopilot |

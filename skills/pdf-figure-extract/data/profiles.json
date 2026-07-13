@@ -1,0 +1,177 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-04-18",
+  "profiles": {
+    "wiley_advmat_2col": {
+      "name": "wiley_advmat_2col",
+      "display_name": "Wiley Advanced Materials (2-column)",
+      "match": {
+        "metadata_producer_regex": ["Wiley|WILEY|InDesign.*WILEY"],
+        "header_text_contains": ["advmat.de", "ADVANCED MATERIALS", "advancedsciencenews"],
+        "page_size_pt": [595, 782]
+      },
+      "layout": {
+        "header_y_range_pt": [0, 60],
+        "footer_y_range_pt": [745, 790],
+        "column_layout": "two_column",
+        "column_split_x_pt": 297,
+        "content_margins_pt": {"left": 35, "right": 560, "top": 60, "bottom": 745}
+      },
+      "caption_pattern": "^(Figure|Scheme|Table)\\s+\\d+\\.",
+      "figure_placement_hints": ["top_of_page", "full_width_preferred", "bottom_right_column"],
+      "stats": {
+        "encountered_count": 1,
+        "last_seen": "2026-04-18",
+        "success_rate": 0.95,
+        "user_corrections": 0
+      },
+      "notes": "Seed profile, validated on Chen 2018 Advanced Materials paper."
+    },
+    "acs_jctc_2col": {
+      "name": "acs_jctc_2col",
+      "display_name": "ACS Journal of Chemical Theory and Computation",
+      "match": {
+        "metadata_producer_regex": ["Adobe.*ACS|ACS PDF|American Chemical Society"],
+        "header_text_contains": ["pubs.acs.org", "Journal of Chemical Theory"],
+        "page_size_pt": [612, 792]
+      },
+      "layout": {
+        "header_y_range_pt": [0, 55],
+        "footer_y_range_pt": [745, 790],
+        "column_layout": "two_column",
+        "column_split_x_pt": 306,
+        "content_margins_pt": {"left": 36, "right": 576, "top": 55, "bottom": 745}
+      },
+      "caption_pattern": "^(Figure|Scheme|Table)\\s+\\d+\\.",
+      "figure_placement_hints": ["top_of_page", "mixed_width"],
+      "stats": {
+        "encountered_count": 0,
+        "last_seen": null,
+        "success_rate": null,
+        "user_corrections": 0
+      },
+      "notes": "Seed profile, not yet validated."
+    },
+    "nature_article": {
+      "name": "nature_article",
+      "display_name": "Nature / Nature family journals",
+      "match": {
+        "metadata_producer_regex": ["Nature|Springer Nature|SpringerNature"],
+        "header_text_contains": ["nature.com"],
+        "page_size_pt": [595, 794]
+      },
+      "layout": {
+        "header_y_range_pt": [0, 50],
+        "footer_y_range_pt": [745, 790],
+        "column_layout": "two_column",
+        "column_split_x_pt": 297,
+        "content_margins_pt": {"left": 36, "right": 559, "top": 50, "bottom": 745}
+      },
+      "caption_pattern": "^(Figure|Fig\\.|Scheme|Table|Extended Data Fig\\.)\\s*\\d+\\|",
+      "figure_placement_hints": ["top_of_page", "full_width_preferred"],
+      "stats": {
+        "encountered_count": 0,
+        "last_seen": null,
+        "success_rate": null,
+        "user_corrections": 0
+      },
+      "notes": "Seed profile. Nature uses 'Fig. N |' caption format."
+    },
+    "arxiv_preprint_1col": {
+      "name": "arxiv_preprint_1col",
+      "display_name": "arXiv preprint (single-column)",
+      "match": {
+        "metadata_producer_regex": ["TeX|LaTeX|pdfTeX|XeTeX"],
+        "language": "en",
+        "page_size_pt": [612, 792]
+      },
+      "layout": {
+        "header_y_range_pt": [0, 40],
+        "footer_y_range_pt": [750, 790],
+        "column_layout": "single_column",
+        "content_margins_pt": {"left": 72, "right": 540, "top": 40, "bottom": 750}
+      },
+      "caption_pattern": "^(Figure|Fig\\.|Scheme|Table)\\s+\\d+[\\.\\:]",
+      "figure_placement_hints": ["mixed", "centered"],
+      "stats": {
+        "encountered_count": 0,
+        "last_seen": null,
+        "success_rate": null,
+        "user_corrections": 0
+      },
+      "notes": "Seed profile for typical arXiv/LaTeX output."
+    },
+    "elsevier_article_2col": {
+      "name": "elsevier_article_2col",
+      "display_name": "Elsevier journals (ScienceDirect)",
+      "match": {
+        "metadata_producer_regex": ["Elsevier|Acrobat.*Elsevier"],
+        "header_text_contains": ["sciencedirect.com"],
+        "page_size_pt": [595, 842]
+      },
+      "layout": {
+        "header_y_range_pt": [0, 60],
+        "footer_y_range_pt": [800, 842],
+        "column_layout": "two_column",
+        "column_split_x_pt": 297,
+        "content_margins_pt": {"left": 42, "right": 555, "top": 60, "bottom": 800}
+      },
+      "caption_pattern": "^(Figure|Fig\\.|Scheme|Table)\\s+\\d+\\.",
+      "figure_placement_hints": ["top_of_page", "bottom_of_page"],
+      "stats": {
+        "encountered_count": 0,
+        "last_seen": null,
+        "success_rate": null,
+        "user_corrections": 0
+      },
+      "notes": "Seed profile. Elsevier uses A4 (842pt)."
+    },
+    "korean_gov_report": {
+      "name": "korean_gov_report",
+      "display_name": "한국 정부 연구개발 보고서 (Korean Gov R&D Report)",
+      "match": {
+        "language": "ko",
+        "header_text_contains": ["연구개발", "최종보고서", "과제번호", "수행기관"],
+        "page_size_pt": [595, 842]
+      },
+      "layout": {
+        "header_y_range_pt": [0, 50],
+        "footer_y_range_pt": [790, 842],
+        "column_layout": "single_column",
+        "content_margins_pt": {"left": 70, "right": 525, "top": 50, "bottom": 790}
+      },
+      "caption_pattern": "^(그림|표|도표)\\s*\\d+[\\.\\:\\s]",
+      "figure_placement_hints": ["centered", "mixed"],
+      "article_starts_at_page": 5,
+      "cover_pages": [1],
+      "toc_pages_max": 5,
+      "stats": {
+        "encountered_count": 0,
+        "last_seen": null,
+        "success_rate": null,
+        "user_corrections": 0
+      },
+      "notes": "Seed profile. Typical Korean gov research report with cover + TOC."
+    },
+    "unknown_fallback": {
+      "name": "unknown_fallback",
+      "display_name": "Unknown layout (fallback)",
+      "match": {},
+      "layout": {
+        "header_y_range_pt": [0, 85],
+        "footer_y_range_pt": [730, 842],
+        "column_layout": "auto_detect",
+        "content_margins_pt": {"left": 30, "right": 565, "top": 85, "bottom": 730}
+      },
+      "caption_pattern": "^(Figure|Fig\\.|Scheme|Table|그림|표|도표)\\s*\\d+",
+      "figure_placement_hints": [],
+      "stats": {
+        "encountered_count": 0,
+        "last_seen": null,
+        "success_rate": null,
+        "user_corrections": 0
+      },
+      "notes": "Conservative fallback for unrecognized PDFs. Uses generous top margin (85pt) to avoid header intrusion."
+    }
+  }
+}

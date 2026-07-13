@@ -1,0 +1,32 @@
+# Personal config (NEVER commit)
+config/*.local.json
+config/local-*.json
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Claude/OMC state
+.omc/
+.claude/sessions/
+*.local.md
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Paper-autopilot working state (per-paper, not plugin code)
+**/.paper-autopilot/

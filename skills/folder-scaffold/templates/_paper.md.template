@@ -1,0 +1,17 @@
+---
+type: paper
+title: ""
+journal: ""
+first_author: ""
+corresponding_author: ""
+deadline:
+status: 아이디어
+progress: 0
+blockers: []
+priority: normal
+tags:
+  - paper
+created: {TODAY}
+updated: {TODAY}
+verified: false
+---

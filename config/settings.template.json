@@ -1,0 +1,37 @@
+{
+  "_comment": "paper-autopilot-open configuration. Copy to ~/.claude/paper-autopilot-open/config.json and fill in your values. NEVER commit this file with real values.",
+  "language": "ko",
+  "timezone": "Asia/Seoul",
+  "papers_root": "{PAPERS_ROOT — e.g. C:/Users/you/Documents/papers or /home/you/papers}",
+  "default_first_author": "{YOUR_NAME}",
+  "default_target_journals": ["Adv. Energy Mater.", "Joule"],
+  "auto_gates_default": "ask",
+  "_auto_gates_comment": "ask | auto | mixed (e.g., 'auto-G1-G3-ask-rest')",
+  "api_keys": {
+    "_comment": "gemini: figure image generation + default embeddings (required). openai: alternative embedding provider. anthropic: only for API-path corpus mining. storm_parse: PDF parsing backend (optional). tavily: ppt-image --ref web search (optional). storm_parse_language: optional output language for STORM parsing (auto | ko | en) — storm_parse.py reads api_keys.storm_parse_language, defaults to 'auto' when absent.",
+    "gemini": "",
+    "openai": "",
+    "anthropic": "",
+    "storm_parse": "",
+    "tavily": ""
+  },
+  "embedding": {
+    "provider": "gemini",
+    "_provider_comment": "gemini (gemini-embedding-001) | openai (text-embedding-3-large). Must match the provider used when the corpus was built. supabase mode fixes the column type to vector(1024) — dimensions MUST stay 1024.",
+    "dimensions": 1024
+  },
+  "rag": {
+    "mode": "local",
+    "_mode_comment": "local (default, no external DB) | supabase (own project) | disabled",
+    "local_corpus_dir": "~/.claude/paper-autopilot-open/corpus",
+    "supabase": {
+      "database_url": "",
+      "direct_url": "",
+      "service_role_key": ""
+    }
+  },
+  "paper_access": {
+    "_comment": "Optional. Your institution's library proxy URL pattern with {URL} placeholder for institutional subscription access.",
+    "institution_proxy_url": ""
+  }
+}

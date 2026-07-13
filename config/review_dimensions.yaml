@@ -1,0 +1,74 @@
+# review_dimensions.yaml
+# paper-autopilot v1.1.0+ pa-spec-review-loop 5-dimension scoring schema.
+# Source of truth for dim names, thresholds, and scope score_mapping referenced by
+# skills/pa-spec-review-loop/SKILL.md. Reviewer→dim mapping mirrors
+# config/active_reviewers_alpha.yaml.
+#
+# Verdict thresholds (all dims): BLOCK score <= 2, WARN 3..6, PASS score >= 7
+# (matches the scope_dim_eval bash: score<=2 -> BLOCK, score>=7 -> PASS, else WARN).
+
+meta:
+  schema_version: "v1.1.0"
+  dimension_count: 5
+
+thresholds:
+  block_max: 2      # score <= 2  -> BLOCK
+  warn_min: 3       # 3 <= score <= 6 -> WARN
+  warn_max: 6
+  pass_min: 7       # score >= 7  -> PASS
+
+dimensions:
+  # ─── completeness ───
+  completeness:
+    description: "claim-evidence completeness + 논증 흐름(intro→method→result→discussion) 완전성"
+    eval_method: agent_dispatch
+    reviewers:
+      - aw-claim-validator
+      - aw-move-flow
+    threshold: { block_max: 2, warn_min: 3, warn_max: 6, pass_min: 7 }
+
+  # ─── consistency ───
+  consistency:
+    description: "acronym / unit / 숫자 / cross-ref 내부 consistency"
+    eval_method: agent_dispatch
+    reviewers:
+      - aw-consistency-checker
+    # rc1+ 활성화 예정 (active_reviewers_alpha.yaml#inactive_reviewers)
+    reviewers_rc1_plus:
+      - aw-figure-vision            # mockup figure PNG 존재 시 활성
+      - aw-bibliography-auditor     # .bib/citation list 5+ entries 시 활성
+    threshold: { block_max: 2, warn_min: 3, warn_max: 6, pass_min: 7 }
+
+  # ─── clarity ───
+  clarity:
+    description: "AI-tell 검출 + hedge level (claim 강도 vs evidence) + domain notation/style"
+    eval_method: agent_dispatch
+    reviewers:
+      - aw-ai-tell
+      - aw-hedge-coach
+      - aw-style-checker
+    threshold: { block_max: 2, warn_min: 3, warn_max: 6, pass_min: 7 }
+
+  # ─── feasibility ───
+  feasibility:
+    description: "methodology reproducibility / 수식 / 물리 제약 검증"
+    eval_method: agent_dispatch
+    reviewers:
+      - aw-technical-reviewer
+    threshold: { block_max: 2, warn_min: 3, warn_max: 6, pass_min: 7 }
+
+  # ─── scope (NEW, internal_logic — no agent dispatch) ───
+  scope:
+    description: >
+      mockup figure_set의 hypothetical:true flag 비율과 input/<latest>/ mtime을 비교해
+      "가설 데이터가 실측으로 대체되지 않았는데 새 입력 데이터가 도착함"을 감지하는 wedge dim.
+    eval_method: internal_logic       # SKILL.md 내부 bash 로직, agent dispatch 없음
+    reviewer: __internal__scope_dim_eval
+    threshold: { block_max: 2, warn_min: 3, warn_max: 6, pass_min: 7 }
+    score_mapping:
+      # ratio = hypothetical_count / total_figure_count
+      all_real:            10    # ratio == 0 (모든 figure hypothetical=false) -> PASS
+      all_hypothetical:     0    # ratio == 1 (모든 figure hypothetical=true)  -> BLOCK
+      mixed:  "round((1 - ratio) * 10)"   # int(x + 0.5) round-half-up (scope-dim.test.sh와 일관)
+      input_newer_override: 2    # input_newer=1 AND hypothetical>0 -> BLOCK (mixed 무시)
+      empty_input_all_real: 10   # input 비어있고 all hypothetical=false -> PASS

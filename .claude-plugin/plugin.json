@@ -1,0 +1,26 @@
+{
+  "name": "paper-autopilot-open",
+  "version": "2.0.0",
+  "description": "Open edition of a battery / materials science paper-writing feedback-loop orchestrator. Onboarding wizard, dual RAG backend (local vector store by default, Supabase optional), self-built corpus from the user's own papers, and no external plugin hard-dependencies. Idea + figure set → folder → mockup → academic-writing → experimental-plan → loop with version management. Includes adversarial review (pa-forcing-questions, pa-spec-review-loop) — still alpha: SKILL.md + mock dogfood verified, real reviewer dispatch verification deferred.",
+  "author": {
+    "name": "SHSUN76",
+    "email": "seondara@gmail.com"
+  },
+  "homepage": "https://github.com/SHSUN76/paper-autopilot-open",
+  "license": "MIT",
+  "keywords": [
+    "academic-writing",
+    "paper",
+    "battery",
+    "materials-science",
+    "rag",
+    "feedback-loop",
+    "research-automation",
+    "version-management",
+    "forcing-questions",
+    "spec-review-loop",
+    "adversarial-review",
+    "onboarding",
+    "open-source"
+  ]
+}

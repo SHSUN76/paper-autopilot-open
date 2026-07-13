@@ -1,0 +1,37 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "paper-autopilot-open-marketplace",
+  "description": "Open edition battery / materials science paper-writing feedback-loop orchestrator marketplace",
+  "owner": {
+    "name": "SHSUN76",
+    "email": "seondara@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "paper-autopilot-open",
+      "description": "Open edition of a battery / materials science paper-writing feedback-loop orchestrator. Onboarding wizard, dual RAG backend (local vector store by default, Supabase optional), self-built corpus from the user's own papers, and no external plugin hard-dependencies. Includes adversarial review (pa-forcing-questions, pa-spec-review-loop) — still alpha.",
+      "version": "2.0.0",
+      "author": {
+        "name": "SHSUN76",
+        "email": "seondara@gmail.com"
+      },
+      "source": "./",
+      "category": "academic-writing",
+      "tags": [
+        "academic-writing",
+        "paper",
+        "battery",
+        "materials-science",
+        "rag",
+        "feedback-loop",
+        "research-automation",
+        "version-management",
+        "forcing-questions",
+        "spec-review-loop",
+        "adversarial-review",
+        "onboarding",
+        "open-source"
+      ]
+    }
+  ]
+}

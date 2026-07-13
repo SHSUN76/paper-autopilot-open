@@ -1,0 +1,16 @@
+{
+  "name": "paper-autopilot-open-scripts",
+  "version": "2.0.0",
+  "description": "Dual-backend RAG helper (local vector store + optional Supabase) for the paper-autopilot-open plugin",
+  "type": "module",
+  "main": "retrieve.mjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node tests/smoke-local.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
