@@ -18,6 +18,7 @@
  *   node retrieve.mjs field-profile          (local only — dumps field-profile.json)
  *   node retrieve.mjs figures --query "Nyquist EIS panel" --type electrochemical --role performance --group field --k 5   (local only — figure-set RAG search)
  *   node retrieve.mjs figure-arcs --group own    (local only — returns ALL figure arcs; not a search)
+ *   node retrieve.mjs methods --query "operando phase transition" --technique XRD --category advanced --group field --k 5   (local only — methodology RAG search)
  *
  * Dev / test bypass for the embedding call (paragraphs, next-paragraph):
  *   --query-vector '[0.1, 0.2, ...]'   supply the query vector directly (skips embed + provider check)
@@ -36,6 +37,7 @@ import {
   loadStore,
   loadFigures,
   loadFigureArcs,
+  loadMethodology,
   arr,
 } from "./ingest/store.mjs";
 
@@ -64,12 +66,15 @@ const VALID_CMDS = [
   "field-profile",
   "figures",
   "figure-arcs",
+  "methods",
 ];
 
 // style-profile / field-profile are local-only artifacts (no supabase analogue).
 const LOCAL_ONLY_CMDS = new Set(["style-profile", "field-profile"]);
 // figures / figure-arcs (figure-set RAG) are local-only too — no supabase schema.
 const FIGURE_CMDS = new Set(["figures", "figure-arcs"]);
+// methods (methodology RAG) is local-only too — no supabase schema.
+const METHOD_CMDS = new Set(["methods"]);
 
 function usageExit() {
   console.error(
@@ -77,7 +82,8 @@ function usageExit() {
       "  paragraphs   --query <t> [--section S] [--claim C] [--group own|field|review] [--since <year>] [--k N]\n" +
       "  figures      --query <t> [--type X] [--role Y] [--group own|field|review] [--k N]\n" +
       "  figure-arcs  [--group own|field|review]   (returns all arcs; not a search)\n" +
-      "  style-profile | field-profile | figures | figure-arcs   (local mode only; run build-corpus.mjs first)"
+      "  methods      --query <t> [--technique T] [--category standard|advanced] [--group own|field|review] [--k N]\n" +
+      "  style-profile | field-profile | figures | figure-arcs | methods   (local mode only; run build-corpus.mjs first)"
   );
   process.exit(1);
 }
@@ -163,6 +169,8 @@ async function runLocal() {
       return localMoveTransitions(store);
     case "figures":
       return localFigures(meta);
+    case "methods":
+      return localMethods(meta);
   }
 }
 
@@ -231,6 +239,51 @@ function localFigureArcs() {
       narrative_role: f.narrativeRole ?? null,
       key_message: f.keyMessage ?? null,
     })),
+  }));
+}
+
+// methodology RAG "not built yet" guard (methodology.jsonl absent / empty).
+function methodologyCorpusMissing() {
+  console.error(
+    "methodology corpus 없음 — vision 분석에 methodology 블록 포함 후 build-corpus 재실행"
+  );
+  process.exit(1);
+}
+
+// methods: pre-filter (technique case-insensitive substring / category exact /
+// group) then cosine top-k. Output contract is fixed (M3 wiring):
+//   [{ paperId, technique, category, purpose, evidence_target, figures,
+//      analysis_pipeline, similarity }]
+async function localMethods(meta) {
+  const methods = loadMethodology(config.rag.local_corpus_dir);
+  if (!methods.length) methodologyCorpusMissing();
+  if (!opts.query) throw new Error("--query required");
+  const k = parseInt(opts.k || "5", 10);
+  const group = figureGroupOpt();
+  if (opts.category && !["standard", "advanced"].includes(opts.category)) {
+    throw new Error("--category must be 'standard' or 'advanced'");
+  }
+  const vec = await embedQuery(opts.query, meta);
+
+  let rows = methods.slice();
+  if (opts.technique) {
+    const t = String(opts.technique).toLowerCase();
+    rows = rows.filter((m) => String(m.technique || "").toLowerCase().includes(t));
+  }
+  if (opts.category) rows = rows.filter((m) => m.category === opts.category);
+  if (group) rows = rows.filter((m) => m.paperGroup === group);
+
+  const scored = rows.map((m) => ({ m, similarity: cosine(vec, m.embedding || []) }));
+  scored.sort((a, b) => b.similarity - a.similarity);
+  return scored.slice(0, k).map(({ m, similarity }) => ({
+    paperId: m.paperId,
+    technique: m.technique ?? null,
+    category: m.category ?? null,
+    purpose: m.purpose ?? null,
+    evidence_target: m.evidenceTarget ?? null,
+    figures: arr(m.figures),
+    analysis_pipeline: m.analysisPipeline ?? null,
+    similarity,
   }));
 }
 
@@ -496,8 +549,9 @@ async function loadSupabaseMeta(client) {
 }
 
 async function runSupabase() {
-  // Profiles and figure-set RAG are local-only features — no supabase analogue.
-  if (LOCAL_ONLY_CMDS.has(cmd) || FIGURE_CMDS.has(cmd)) {
+  // Profiles, figure-set RAG, and methodology RAG are local-only features — no
+  // supabase analogue.
+  if (LOCAL_ONLY_CMDS.has(cmd) || FIGURE_CMDS.has(cmd) || METHOD_CMDS.has(cmd)) {
     console.error(
       `${cmd} is a local-only feature (rag.mode='local'). ` +
         "It has no supabase backend — build a local corpus and query it there."

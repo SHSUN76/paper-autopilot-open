@@ -10,6 +10,10 @@
  *   - review group + field-profile.review_papers block (review not in style-profile)
  *   - figure-set RAG: ingest, search + --type/--role/--group filters, arc shape,
  *     paperGroup resolution, incremental skip / --force, not-built guard, report section
+ *   - methodology RAG: ingest from figures.json methodology block, methods search +
+ *     --technique/--category/--group filters, shape, analysis_pipeline replication,
+ *     missing-category warning, incremental skip / --force, not-built guard,
+ *     figures.json-without-methodology backward-compat, report section
  *   - rag.mode = "disabled" -> exit code 2; supabase local-only guards
  *   - --query-vector dev bypass (skips embedding entirely)
  *
@@ -1018,6 +1022,239 @@ check("report legend includes review swatch color #5aa469", figHtml3.includes("#
 check("report legend includes review label", figHtml3.includes("review (리뷰)"));
 check("report group table includes review row", figHtml3.includes("review 논문"));
 check("small corpus report has no PCA sampling note", !figHtml3.includes("PCA 표본"));
+
+// === 22. methodology RAG ======================================================
+// Dedicated corpus: own + field paragraph papers, each with a `.figures.json`
+// that ALSO carries a top-level `methodology` block (advanced/standard mix, plus
+// a technique with a missing category to exercise the warn+default path).
+// Exercises methodology ingest, methods search + --technique/--category/--group
+// filters, output shape, analysis_pipeline replication, incremental skip /
+// --force, not-built guard, backward-compat (figures.json w/o methodology), and
+// the report section.
+console.log("\n[methodology] dedicated corpus");
+const corpusMeth = path.join(work, "corpus_meth");
+const inMethOwn = path.join(work, "in_meth_own");
+const inMethField = path.join(work, "in_meth_field");
+const inMethFigs = path.join(work, "in_meth_figs");
+for (const d of [inMethOwn, inMethField, inMethFigs]) fs.mkdirSync(d, { recursive: true });
+
+fs.writeFileSync(
+  path.join(inMethOwn, "metha2024.json"),
+  JSON.stringify({
+    paper_id: "metha2024",
+    source_file: "metha.pdf",
+    metadata: { title: "Own operando study", journal: "Joule", year: 2024 },
+    lexicon,
+    paragraphs: [
+      para("Introduction", 0, "motivation", "The own paper tracks phase transitions during cycling of a high nickel cathode."),
+      para("Results", 0, "evidence", "Operando diffraction revealed a reversible phase transition across the cycle."),
+    ],
+  })
+);
+fs.writeFileSync(
+  path.join(inMethField, "methb2023.json"),
+  JSON.stringify({
+    paper_id: "methb2023",
+    source_file: "methb.pdf",
+    metadata: { title: "Field spectroscopy study", journal: "Nature Energy", year: 2023 },
+    lexicon,
+    paragraphs: [
+      para("Introduction", 0, "motivation", "The field paper probes interfacial chemistry with in situ spectroscopy on cycling."),
+      para("Results", 0, "evidence", "In situ Raman resolved the electrolyte decomposition products during cycling."),
+    ],
+  })
+);
+
+// figures.json report carrying a top-level methodology block
+function figMethReport(paperId, figures, techniques, pipeline) {
+  return {
+    paper_id: paperId,
+    figures,
+    arc_pattern: "concept → proof",
+    arc_summary: "Concept then proof.",
+    narrative_logic: "concept-then-proof",
+    methodology: { techniques, analysis_pipeline: pipeline },
+  };
+}
+
+fs.writeFileSync(
+  path.join(inMethFigs, "metha2024.figures.json"),
+  JSON.stringify(
+    figMethReport(
+      "metha2024",
+      [fig("Fig1", 1, 1, ["electrochemical"], "performance", 2, "1x2", [{ label: "a", type: "line", summary: "capacity" }], "Cycling.", "Retention.", "Perf.", [], ["cycling"])],
+      [
+        { technique: "operando XRD", category: "advanced", purpose: "충방전 중 상전이 실시간 추적", evidence_target: "mechanism: 용량 감쇠가 상전이 비가역성에서 온다는 주장의 직접 근거", figures: ["Fig3"], instrument_notes: "synchrotron beamline" },
+        { technique: "SEM", category: "standard", purpose: "입자 형상 확인", evidence_target: "coating morphology", figures: ["Fig1"] },
+      ],
+      "operando XRD로 상전이를 추적하고 SEM으로 형상을 보조 확인하는 전략."
+    )
+  )
+);
+fs.writeFileSync(
+  path.join(inMethFigs, "methb2023.figures.json"),
+  JSON.stringify(
+    figMethReport(
+      "methb2023",
+      [fig("Fig1", 1, 1, ["morphology"], "morphology", 1, "1x1", [{ label: "a", type: "SEM", summary: "film" }], "Film.", "Coverage.", "Morph.", [], ["film"])],
+      [
+        { technique: "in situ Raman", category: "advanced", purpose: "계면 반응 실시간 추적", evidence_target: "mechanism: 전해질 분해 경로", figures: ["Fig2"], instrument_notes: "532 nm laser" },
+        { technique: "cyclic voltammetry", category: "standard", purpose: "산화환원 거동 확인", evidence_target: "redox reversibility", figures: ["Fig3"] },
+        // technique with a MISSING category -> defaults to standard + warns (경고 1줄)
+        { technique: "EIS", purpose: "임피던스 측정", evidence_target: "interfacial resistance", figures: ["Fig4"] },
+      ],
+      "in situ Raman과 CV, EIS로 계면 반응과 임피던스를 교차 확인."
+    )
+  )
+);
+
+const methEnv = { PAO_CORPUS_DIR: corpusMeth };
+
+// build paragraph papers (own/field) so methodology paperGroup resolves
+r = run(BUILD, ["--input", inMethOwn, "--group", "own"], methEnv);
+check("meth build own exits 0", r.code === 0, "code=" + r.code);
+r = run(BUILD, ["--input", inMethField, "--group", "field"], methEnv);
+check("meth build field exits 0", r.code === 0, "code=" + r.code);
+
+// methods not built yet -> specific guard message
+console.log("\n[methodology] not-built guard");
+r = run(RETRIEVE, ["methods", "--query", "phase transition"], methEnv, true);
+check("methods (no methodology corpus) -> exit 1", r.code === 1, "code=" + r.code);
+check("methods (no methodology corpus) -> guidance",
+  (r.stderr || "").includes("methodology corpus 없음"), "stderr=" + (r.stderr || "").slice(0, 160));
+
+// ingest figures + methodology (from the same .figures.json files)
+console.log("\n[methodology] ingest");
+r = run(BUILD, ["--input", inMethFigs, "--group", "own"], methEnv);
+s = json(r.stdout);
+check("meth ingest exits 0", r.code === 0, "code=" + r.code);
+check("methods_added == 5 (2 + 3)", s && s.methods_added === 5, s && "got " + s.methods_added);
+check("figures_added == 2 (co-ingested from same files)", s && s.figures_added === 2, s && "got " + s.figures_added);
+check("meth ingest emits missing-category warning for EIS (경고 1줄)",
+  s && Array.isArray(s.warnings) && s.warnings.some((w) => /category missing\/invalid/i.test(w) && /EIS/.test(w)),
+  s && "warnings=" + JSON.stringify(s && s.warnings));
+
+// methodology.jsonl records + shape
+const methLines = fs.readFileSync(path.join(corpusMeth, "methodology.jsonl"), "utf8").split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
+check("methodology.jsonl has 5 records", methLines.length === 5, "got " + methLines.length);
+check("methodology record carries an 8-dim embedding (stub)",
+  methLines.every((m) => Array.isArray(m.embedding) && m.embedding.length === 8));
+check("methodology analysis_pipeline replicated onto each record",
+  methLines.filter((m) => m.paperId === "metha2024").every((m) => typeof m.analysisPipeline === "string" && m.analysisPipeline.length > 0));
+check("methodology figures[] preserved (operando XRD -> Fig3)",
+  methLines.some((m) => m.technique === "operando XRD" && Array.isArray(m.figures) && m.figures.includes("Fig3")));
+check("EIS technique defaulted to category=standard", methLines.some((m) => m.technique === "EIS" && m.category === "standard"));
+check("metha methods paperGroup == own", methLines.filter((m) => m.paperId === "metha2024").every((m) => m.paperGroup === "own"));
+check("methb methods paperGroup == field (resolved from paragraph paper, not --group own)",
+  methLines.filter((m) => m.paperId === "methb2023").every((m) => m.paperGroup === "field"));
+
+// methods search + output shape
+console.log("\n[methodology] search + filters");
+r = run(RETRIEVE, ["methods", "--query", "phase transition operando diffraction", "--k", "10"], methEnv);
+data = json(r.stdout);
+check("methods search exits 0", r.code === 0, "code=" + r.code);
+check("methods search returns array", Array.isArray(data) && data.length > 0);
+check("methods row shape (output contract)",
+  Array.isArray(data) && data.length > 0 &&
+    hasKeys(data[0], ["paperId", "technique", "category", "purpose", "evidence_target", "figures", "analysis_pipeline", "similarity"]),
+  data && data[0] && "keys=" + Object.keys(data[0] || {}).join(","));
+check("methods similarity is number", Array.isArray(data) && typeof data[0]?.similarity === "number");
+check("methods figures is array", Array.isArray(data) && Array.isArray(data[0]?.figures));
+
+// --technique (case-insensitive substring)
+r = run(RETRIEVE, ["methods", "--query", "diffraction", "--technique", "xrd", "--k", "10"], methEnv);
+data = json(r.stdout);
+check("methods --technique xrd exits 0", r.code === 0, "code=" + r.code);
+check("methods --technique xrd -> only operando XRD (case-insensitive substring)",
+  Array.isArray(data) && data.length > 0 && data.every((x) => /xrd/i.test(x.technique)),
+  data && "techs=" + JSON.stringify(Array.isArray(data) ? data.map((x) => x.technique) : data));
+
+// --category advanced / standard (exact)
+r = run(RETRIEVE, ["methods", "--query", "in situ mechanism", "--category", "advanced", "--k", "10"], methEnv);
+data = json(r.stdout);
+check("methods --category advanced -> only advanced",
+  Array.isArray(data) && data.length > 0 && data.every((x) => x.category === "advanced"),
+  data && "cats=" + JSON.stringify(Array.isArray(data) ? data.map((x) => x.category) : data));
+r = run(RETRIEVE, ["methods", "--query", "standard technique morphology", "--category", "standard", "--k", "10"], methEnv);
+data = json(r.stdout);
+check("methods --category standard -> only standard",
+  Array.isArray(data) && data.length > 0 && data.every((x) => x.category === "standard"),
+  data && "cats=" + JSON.stringify(Array.isArray(data) ? data.map((x) => x.category) : data));
+
+// --group
+r = run(RETRIEVE, ["methods", "--query", "cathode", "--group", "own", "--k", "10"], methEnv);
+data = json(r.stdout);
+check("methods --group own -> only metha2024",
+  Array.isArray(data) && data.length > 0 && data.every((x) => x.paperId === "metha2024"),
+  data && "paperIds=" + (Array.isArray(data) ? [...new Set(data.map((x) => x.paperId))].join(",") : data));
+r = run(RETRIEVE, ["methods", "--query", "electrolyte", "--group", "field", "--k", "10"], methEnv);
+data = json(r.stdout);
+check("methods --group field -> only methb2023",
+  Array.isArray(data) && data.length > 0 && data.every((x) => x.paperId === "methb2023"),
+  data && "paperIds=" + (Array.isArray(data) ? [...new Set(data.map((x) => x.paperId))].join(",") : data));
+
+// --category bogus rejected
+r = run(RETRIEVE, ["methods", "--query", "x", "--category", "bogus"], methEnv, true);
+check("methods --category bogus rejected (exit 1)", r.code === 1, "code=" + r.code);
+
+// incremental skip
+console.log("\n[methodology] incremental skip / --force");
+r = run(BUILD, ["--input", inMethFigs, "--group", "own"], methEnv);
+s = json(r.stdout);
+check("meth re-ingest exits 0", r.code === 0, "code=" + r.code);
+check("meth re-ingest methods_added == 0", s && s.methods_added === 0, s && "got " + s.methods_added);
+check("meth re-ingest methods_skipped == 5", s && s.methods_skipped === 5, s && "got " + s.methods_skipped);
+const methLines2 = fs.readFileSync(path.join(corpusMeth, "methodology.jsonl"), "utf8").split(/\r?\n/).filter((l) => l.trim());
+check("methodology.jsonl still 5 records after skip (no dupes)", methLines2.length === 5, "got " + methLines2.length);
+
+// --force re-ingest -> purge + re-add, still 5
+r = run(BUILD, ["--input", inMethFigs, "--group", "own", "--force"], methEnv);
+s = json(r.stdout);
+check("meth --force methods_added == 5", s && s.methods_added === 5, s && "got " + s.methods_added);
+const methLines3 = fs.readFileSync(path.join(corpusMeth, "methodology.jsonl"), "utf8").split(/\r?\n/).filter((l) => l.trim());
+check("methodology.jsonl still 5 records after --force (no dupes)", methLines3.length === 5, "got " + methLines3.length);
+
+// methods local-only in supabase mode
+console.log("\n[methodology] supabase mode -> local-only exit 1");
+r = run(RETRIEVE, ["methods", "--query", "x"], { ...methEnv, PAO_RAG_MODE: "supabase" }, true);
+check("methods supabase -> exit 1", r.code === 1, "code=" + r.code);
+check("methods supabase -> local-only note", (r.stderr || "").includes("local-only"));
+
+// backward-compat: figures.json WITHOUT a methodology block (corpus_fig) -> figures
+// ingested normally, NO methodology.jsonl created, methods query -> guard.
+console.log("\n[methodology] backward-compat: figures.json without methodology block");
+check("corpus_fig has NO methodology.jsonl (figure-only ingest)",
+  !fs.existsSync(path.join(corpusFig, "methodology.jsonl")));
+r = run(RETRIEVE, ["methods", "--query", "coating"], figEnv, true);
+check("methods on methodology-less corpus -> exit 1 guard", r.code === 1, "code=" + r.code);
+check("methods on methodology-less corpus -> guidance", (r.stderr || "").includes("methodology corpus 없음"));
+
+// report block present on the methodology corpus
+console.log("\n[report] methodology section present when methodology.jsonl exists");
+r = run(REPORT, [], methEnv);
+const methReportSummary = json(r.stdout);
+check("report (meth corpus) exits 0", r.code === 0, "code=" + r.code);
+const methReportPath = methReportSummary && methReportSummary.out ? methReportSummary.out : path.join(corpusMeth, "corpus-report.html");
+check("report (meth corpus) HTML exists", methReportSummary && fs.existsSync(methReportPath));
+if (methReportSummary && fs.existsSync(methReportPath)) {
+  const methHtml = fs.readFileSync(methReportPath, "utf8");
+  check("report HTML has methodology section header", methHtml.includes("분석 기법 구성"));
+  check("report HTML has advanced 기법 chart", methHtml.includes("advanced 기법 상위"));
+  check("report HTML has standard 기법 chart", methHtml.includes("standard 기법 상위"));
+  check("report HTML lists a technique name (operando XRD)", methHtml.includes("operando XRD"));
+  const methStripped = methHtml.replace(/xmlns(:\w+)?="[^"]*"/g, "");
+  check("report (meth corpus) HTML has no external http(s) URL", !/https?:\/\//.test(methStripped),
+    "found: " + ((methStripped.match(/https?:\/\/[^\s"'<>]*/) || [])[0] || ""));
+}
+
+// report on corpus_fig (no methodology) omits the methodology section
+console.log("\n[report] no methodology section on methodology-less corpus");
+r = run(REPORT, [], figEnv);
+if (r.code === 0) {
+  const noMethPath = path.join(corpusFig, "corpus-report.html");
+  const noMethHtml = fs.existsSync(noMethPath) ? fs.readFileSync(noMethPath, "utf8") : "";
+  check("methodology-less report omits methodology section", !noMethHtml.includes("분석 기법 구성"));
+}
 
 // --- cleanup -----------------------------------------------------------------
 try { fs.rmSync(work, { recursive: true, force: true }); } catch {}

@@ -101,6 +101,19 @@ Detect physically unrealistic claims:
 - 불일치는 severity(confirmed / needs-verification)와 함께 보고하고, 근거로 `(MP, mp-XXXX, accessed YYYY-MM-DD)`를 남긴다.
 - **키가 없으면(api_keys.materials_project 미설정) 이 단계는 skip하고 "MP fact-check 미수행(키 없음)"을 보고에 명시** — 값을 추정하지 않는다. 미등재 재료도 정직하게 "MP 미등재"로 표기.
 
+### 6c. 방법론 관례 대조 (methodology RAG)
+
+원고의 **mechanism / 성능 원인 주장**(예: "계면 SEI가 안정하다", "전하 이동 저항이 감소했다")을 발견하면, 분야에서 그 주장을 무슨 기법으로 증명하는지 조회한다:
+
+```bash
+node <plugin>/scripts/retrieve.mjs methods \
+  --query "<원고의 mechanism 주장>" --group field --k 5
+```
+
+반환된 `technique` / `evidence_target` / `analysis_pipeline`를 원고의 근거 기법과 대조한다. 원고의 근거가 관례 대비 약하면(예: 분야는 operando/in-situ를 관례로 쓰는데 원고는 ex-situ 단발 측정만) severity(confirmed / needs-verification)와 함께 지적하고, 근거로 `(methodology RAG, <paperId>, <technique>)`를 남긴다.
+
+**폴백**: `methods` 커맨드가 exit 1(methodology.jsonl 미구축)이면 이 대조를 skip하고 "방법론 관례 대조 미수행(methodology RAG 미구축)"을 보고에 명시 — 관례를 추정하지 않는다.
+
 ### 7. Comparison fairness
 
 For "GIDE outperforms CDE" claims:

@@ -107,6 +107,23 @@ python -c "import requests" # requests (HTTP)
 
 `requirements.txt`는 `PyMuPDF`, `Pillow`, `python-docx`, `requests`를 고정한다. Python 도구를 쓰지 않을 사용자는 이 단계 전체를 건너뛰어도 나머지 파이프라인은 정상 동작한다.
 
+### 1c. Playwright MCP (paper-access 기관 구독 접근 — 선택)
+
+`paper-access`의 Tier 1/2 기관 구독 접근과 Phase 2.4의 프록시 반자동 등록이 Playwright MCP를 쓴다. 없으면 감지 후 사용자 동의를 받아 설치한다.
+
+1. **감지**: ToolSearch로 `mcp__playwright__browser_navigate` 등 `mcp__playwright__browser_*` 도구 존재를 확인한다.
+   - 있으면 → ✅ "Playwright MCP 준비 완료" 보고, 설치 생략(2.4를 정상 진행).
+2. **미감지 → 설치 동의**: "paper-access 기관 구독 접근(Tier 1/2)과 프록시 반자동 등록에 Playwright MCP가 필요합니다. 지금 설치할까요? (건너뛰면 수동 프록시 입력으로 폴백)"을 묻는다. 동의 시 사용자 스코프로 등록한다:
+   ```bash
+   claude mcp add playwright --scope user -- npx -y @playwright/mcp@latest
+   ```
+   성공하면 브라우저 바이너리(chromium, **~130MB 다운로드**)는 **별도 동의**를 받아 설치한다:
+   ```bash
+   npx -y playwright install chromium
+   ```
+3. **핵심 고지 (세션 재시작 필요)**: MCP 서버가 제공하는 도구는 **Claude Code 세션을 재시작한 후에만 로드**된다. 방금 설치했더라도 **이번 세션에서는** `mcp__playwright__browser_*`가 아직 보이지 않는다. 다음과 같이 안내한다: "Playwright MCP를 설치했습니다. **Claude Code를 재시작한 뒤 `/paper-autopilot-open:onboard config`로 프록시 등록 단계를 재개**하세요. 지금 세션에서는 Phase 2.4 프록시 반자동 등록을 우아하게 건너뛰고 수동 폴백으로 진행합니다."
+4. **미동의 / 설치 실패**: 건너뛰고 Phase 2.4는 수동 프록시 입력 폴백으로 진행한다. paper-access는 Tier 1(IP 기반)만 제한적으로 쓸 수 있음을 알린다.
+
 ---
 
 ## Phase 2 — config 마법사 (config)
@@ -171,6 +188,7 @@ python -c "import requests" # requests (HTTP)
 
 1. **포털 URL 질문**: "소속 기관 도서관 포털 URL을 알려주세요 (건너뛰려면 '건너뜀')". 건너뛰면 `paper_access.institution_proxy_url`을 미설정(`""`)으로 두고 이 절을 종료한다.
 2. **Playwright MCP 가용성 확인**: ToolSearch로 `mcp__playwright__browser_navigate` 등 브라우저 도구 존재를 확인한다.
+   - **Phase 1c에서 방금 설치했으나 세션 미재시작이면 도구가 아직 로드되지 않은 상태다** — 이 경우 이 절을 우아하게 건너뛰고, "Claude Code를 재시작한 뒤 `/paper-autopilot-open:onboard config`로 프록시 등록을 재개하세요" 안내와 함께 수동 폴백을 유지한다.
    - **없으면 → 수동 입력 폴백**: 아래 패턴 예시 3종을 제시하고 사용자가 직접 기입하게 안내한다.
      - EZproxy: `https://login.proxy.<univ>.ac.kr/login?url={URL}`
      - OpenAthens: `https://go.openathens.net/redirector/<domain>?url={URL}`
@@ -225,9 +243,9 @@ python -c "import requests" # requests (HTTP)
 이 태깅은 **Claude Code 서브에이전트**로 수행한다 → **API 비용 0**(구독 크레딧 사용). Anthropic API 키가 있어도 기본은 서브에이전트 경로.
 **review 그룹도 이 문단 태깅은 받는다** — 분야 지식 검색용 임베딩만 필요하기 때문. review는 다음의 3.2V(figure vision)와 3.3의 style-profile 생성에서만 제외된다.
 
-### 3.2V figure vision 정밀 분석 (own + field 전용, review 제외)
+### 3.2V figure + methodology vision 정밀 분석 (own + field 전용, review 제외)
 
-own+field 10편(review 제외)은 문단 태깅과 **별도로** 논문 맥락 + figure set을 vision AI로 정밀 파악한다. 각 논문에 대해 **Claude Code 서브에이전트**를 띄워 PDF를 vision으로 정독한다 — Read 도구는 PDF를 페이지 vision으로 읽으며 **호출당 최대 20페이지**이므로, 페이지가 많은 논문은 분할해서 읽는다. 서브에이전트는 논문당 1개의 `<paper_id>.figures.json`을 문단 report와 **같은** `_reports/`(own은 `own/`, field는 `field/` 하위)에 저장한다. 스키마·추출 절차·hallucination 가드는 `paper-corpus-mining` 스킬의 **`references/figure_extraction.md`**(Stage 1V)를 따르며, 핵심 필드는 `{ paper_id, figures[]: { fig_id, figure_type, panel_count, panels[], caption, key_message, narrative_role, narrative_context, quantitative_claims, domain_tags }, arc_pattern, arc_summary, narrative_logic }`이다.
+own+field 10편(review 제외)은 문단 태깅과 **별도로** 논문 맥락 + figure set + **방법론(고도분석 기법)의 사용 맥락**을 vision AI로 정밀 파악한다. 각 논문에 대해 **Claude Code 서브에이전트**를 띄워 PDF를 vision으로 정독한다 — Read 도구는 PDF를 페이지 vision으로 읽으며 **호출당 최대 20페이지**이므로, 페이지가 많은 논문은 분할해서 읽는다. 서브에이전트는 논문당 1개의 `<paper_id>.figures.json`을 문단 report와 **같은** `_reports/`(own은 `own/`, field는 `field/` 하위)에 저장한다. **figure 구성과 methodology를 한 번에(동시) 추출**한다 — figures/아크 + optional top-level `methodology` 블록(기법 → 목적 → 증명 대상 `evidence_target` → 짝지은 figure)을 같은 서브에이전트가 함께 채운다. 스키마·추출 절차·hallucination 가드는 `paper-corpus-mining` 스킬의 **`references/figure_extraction.md`**(Stage 1V)를 따르며, 핵심 필드는 `{ paper_id, figures[]: { fig_id, figure_type, panel_count, panels[], caption, key_message, narrative_role, narrative_context, quantitative_claims, domain_tags }, arc_pattern, arc_summary, narrative_logic, methodology?: { techniques[]: { technique, category, purpose, evidence_target, figures[] }, analysis_pipeline } }`이다.
 
 - **비용·시간 고지**: vision 정독은 **구독 크레딧**으로 수행 → **API 비용 0**. 다만 논문당 수 분이 걸리므로(총 10편 = 수십 분) 실행 전에 소요 시간을 알린다. 서브에이전트로 격리 실행해 메인 컨텍스트 오염을 막고, 5편씩 배치로 띄운다(30편 이상 아니므로 배치 1~2회).
 - **자동 적재**: 완료 후 3.3의 `build-corpus.mjs`가 `_reports/`에서 `<paper_id>.figures.json`을 **접미사(`.figures.json`)로 자동 감지**해 figure 인덱스(`figures.jsonl`)와 아크(`figure-arcs.json`)로 적재한다. 사용자는 추가 명령 없이 문단 report와 함께 두기만 하면 된다.
@@ -280,7 +298,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/report/corpus-report.mjs"
   - **field** = **분야 지식·최신 흐름**. 용어·구조·최근 동향의 기준 (`retrieve.mjs field-profile`, `retrieve.mjs paragraphs --group field --since <year>`로 최신 논문만 필터).
 - 사용자 corpus가 **30편 이상** 모이면 108편 통계 대신 본인 corpus로 리뷰 규칙 통계를 **재보정**하는 것을 권장한다 (분야가 baseline과 다를수록 효과 큼).
 
-### 3.7 figure RAG 결과 확인 (figure vision을 수행한 경우만)
+### 3.7 figure + methodology RAG 결과 확인 (figure vision을 수행한 경우만)
 
 3.2V의 figure vision 패스를 돌렸으면, 적재된 아크가 제대로 학습됐는지 마지막에 한 번 확인한다:
 
@@ -297,7 +315,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" figure-arcs
 ...
 ```
 
-이는 "figure set 구성을 RAG로 학습했다"는 것을 사용자가 눈으로 확인하는 단계다. figure vision을 건너뛰었으면 이 절도 건너뛴다(빈 결과면 "figure RAG 미구축"만 1줄 알림). 개별 figure 검색·아크 필터 옵션은 `references/corpus-build.md`의 retrieve 절 참조.
+**methods 수 표시 (Phase 3 종료 요약)**: 3.3 `build-corpus.mjs` 요약의 `methods_added`(적재된 고도분석 기법 수)를 함께 1줄로 보고한다. 예: `방법론 RAG: advanced 기법 8건 / standard 4건 적재 (own+field)`. 필요하면 `retrieve.mjs methods --query "..." --category advanced --k 5`로 샘플을 확인한다.
+
+이는 "figure set 구성 + 방법론 사용 맥락을 RAG로 학습했다"는 것을 사용자가 눈으로 확인하는 단계다. figure vision을 건너뛰었으면 이 절도 건너뛴다(빈 결과면 "figure/methodology RAG 미구축"만 1줄 알림). 개별 figure 검색·아크 필터·`methods` 검색 옵션은 `references/corpus-build.md`의 retrieve 절 참조.
 
 ---
 
@@ -347,12 +367,14 @@ paper-autopilot-open 온보딩 완료
 |---------------------|------|
 | review corpus       | ✅ (review R편, 분야 지식 검색) / ⏭️ 건너뜀 |
 | figure RAG (아크)   | ✅ (figures.jsonl / figure-arcs.json, own+field vision) / ⏭️ 건너뜀 |
+| methodology RAG     | ✅ (methods 인덱스, advanced/standard 기법 사용 맥락) / ⏭️ 건너뜀 |
 | Python 라이브러리   | ✅ 설치 / ⏭️ Python 없음 |
 | pandoc (docx)       | ⏭️ 미설치 |
 | Tavily (--ref)      | ⏭️ 건너뜀 |
 | STORM (parse)       | ⏭️ 건너뜀 |
 | Materials Project   | ✅ 설정 (재료 물성 fact-check·구조 데이터 grounding) / ⏭️ 건너뜀 |
 | Supabase            | ⏭️ 로컬 모드 사용 |
+| Playwright MCP      | ✅ 이미 설치 / ✅ 설치함(재시작 후 로드) / ⏭️ 건너뜀 |
 | 기관 프록시         | ✅ 반자동 등록 / ✍️ 수동 입력 / ⏭️ 건너뜀 |
 
 다음 단계:
@@ -370,5 +392,5 @@ paper-autopilot-open 온보딩 완료
 ## References (progressive disclosure)
 
 - `references/config-wizard.md` — Phase 2 상세: 필드↔config 키 매핑, AskUserQuestion 문항 구성, 마스킹·백업·Supabase 수집 절차, **기관 프록시 반자동 등록**(패턴 추출·검증·자격증명 금지 원칙)
-- `references/corpus-build.md` — Phase 3 상세: `_corpus_input/own\|field\|review\|_reports` 폴더 구조, paper-corpus-mining 태깅 스키마, build-corpus/ingest-supabase 명령(`--group own\|field\|review`), **style-profile/field-profile 스키마 개요**, **figure vision report(`<paper_id>.figures.json`) 스키마 + figures.jsonl/figure-arcs.json 산출물**, **`figures`/`figure-arcs` retrieve 명령**, **corpus-report.mjs 사용법**, **`--since` 필터**, 2층 전략, 비용표
-- `../paper-corpus-mining/references/figure_extraction.md` — figure vision 추출 정본 스키마 + 추출 절차 + hallucination 가드 (3.2V가 따르는 Stage 1V 가이드)
+- `references/corpus-build.md` — Phase 3 상세: `_corpus_input/own\|field\|review\|_reports` 폴더 구조, paper-corpus-mining 태깅 스키마, build-corpus/ingest-supabase 명령(`--group own\|field\|review`), **style-profile/field-profile 스키마 개요**, **figure vision report(`<paper_id>.figures.json`) 스키마 + optional `methodology` 블록 + figures.jsonl/figure-arcs.json/methods 산출물**, **`figures`/`figure-arcs`/`methods` retrieve 명령**, **corpus-report.mjs 사용법**, **`--since` 필터**, 2층 전략, 비용표
+- `../paper-corpus-mining/references/figure_extraction.md` — figure vision 추출 정본 스키마 + optional `methodology` 블록(고도분석 기법 사용 맥락, advanced/standard 판별) + 추출 절차 + hallucination 가드 (3.2V가 따르는 Stage 1V 가이드)

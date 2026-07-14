@@ -15,11 +15,14 @@
  *   --force         re-embed and overwrite papers already in the store
  *                   (default: skip papers already present — incremental)
  *
+ *                   A `<paper_id>.figures.json` may also carry an optional top-
+ *                   level `methodology` block (techniques[] + analysis_pipeline)
+ *                   which is ingested into the methodology RAG store.
  * Progress -> stderr. Summary JSON -> stdout:
  *   { papers_added, papers_skipped, paragraphs_embedded, moves_added,
  *     vocabulary_added, aitells_added, figures_added, arcs_added,
- *     figures_skipped, api_calls, estimated_cost_usd,
- *     provider, dimensions, warnings }
+ *     figures_skipped, methods_added, methods_skipped, api_calls,
+ *     estimated_cost_usd, provider, dimensions, warnings }
  *
  * Cost: openai text-embedding-3-large ~= $0.13 / 1M tokens.
  *       gemini has a free tier (rate-limited) -> estimated_cost_usd = 0.
@@ -38,11 +41,14 @@ import {
   loadAitells,
   loadFigures,
   loadFigureArcs,
+  loadMethodology,
   writeStore,
   writeFigureStore,
+  writeMethodologyStore,
   parseReport,
   parseFigureReport,
   figureEmbeddingText,
+  methodEmbeddingText,
   normGroup,
   PAPER_GROUPS,
   STORE_VERSION,
@@ -140,6 +146,8 @@ async function main() {
     figures_added: 0,
     arcs_added: 0,
     figures_skipped: 0,
+    methods_added: 0,
+    methods_skipped: 0,
     api_calls: 0,
     estimated_cost_usd: 0,
     provider,
@@ -351,7 +359,12 @@ async function main() {
   if (figureFiles.length > 0) {
     let figures = loadFigures(dir);
     let arcs = loadFigureArcs(dir);
+    let methodology = loadMethodology(dir);
     const existingFigurePaperIds = new Set(figures.map((f) => f.paperId));
+    // Methodology has its OWN existence tracking (not tied to figures) so a paper
+    // whose figures were ingested before the methodology block existed still
+    // picks up its methodology on the next incremental build (without --force).
+    const existingMethodPaperIds = new Set(methodology.map((m) => m.paperId));
 
     // paperGroup / journal / year resolution from the merged paper set.
     const groupByPaper = new Map(mergedPapers.map((p) => [p.paperId, normGroup(p.paperGroup)]));
@@ -362,7 +375,10 @@ async function main() {
     const newFigures = [];
     const newFigureTexts = []; // parallel to newFigures (kept aligned across skips)
     const newArcs = [];
+    const newMethods = [];
+    const newMethodTexts = []; // parallel to newMethods
     const figRebuildIds = new Set();
+    const methRebuildIds = new Set();
     const seenFigThisRun = new Set();
 
     for (const file of figureFiles) {
@@ -391,30 +407,50 @@ async function main() {
         process.stderr.write(`skip figures (duplicate in run): ${paperId}\n`);
         continue;
       }
-      if (existingFigurePaperIds.has(paperId)) {
-        if (!force) {
-          summary.figures_skipped += parsed.figures.length;
-          process.stderr.write(`skip figures (exists): ${paperId}\n`);
-          continue;
-        }
-        figRebuildIds.add(paperId); // purge old figure rows below
-      }
+      seenFigThisRun.add(paperId);
 
       for (const w of parsed.warnings) warnings.push(w);
       const bib = metaByPaper.get(paperId) || {};
-      for (const fig of parsed.figures) {
-        newFigures.push(fig);
-        newFigureTexts.push(figureEmbeddingText(fig, { journal: bib.journal, year: bib.year }));
+
+      // --- figures + arc (incremental unit = paperId) ---
+      if (existingFigurePaperIds.has(paperId) && !force) {
+        summary.figures_skipped += parsed.figures.length;
+        process.stderr.write(`skip figures (exists): ${paperId}\n`);
+      } else {
+        if (existingFigurePaperIds.has(paperId)) figRebuildIds.add(paperId); // purge below
+        for (const fig of parsed.figures) {
+          newFigures.push(fig);
+          newFigureTexts.push(figureEmbeddingText(fig, { journal: bib.journal, year: bib.year }));
+        }
+        newArcs.push(parsed.arc);
+        process.stderr.write(`parsed figures: ${paperId} (${parsed.figures.length} figures)\n`);
       }
-      newArcs.push(parsed.arc);
-      seenFigThisRun.add(paperId);
-      process.stderr.write(`parsed figures: ${paperId} (${parsed.figures.length} figures)\n`);
+
+      // --- methodology (independent incremental unit = paperId) ---
+      if (parsed.methodology && parsed.methodology.length) {
+        if (existingMethodPaperIds.has(paperId) && !force) {
+          summary.methods_skipped += parsed.methodology.length;
+          process.stderr.write(`skip methods (exists): ${paperId}\n`);
+        } else {
+          if (existingMethodPaperIds.has(paperId)) methRebuildIds.add(paperId); // purge below
+          for (const m of parsed.methodology) {
+            newMethods.push(m);
+            newMethodTexts.push(methodEmbeddingText(m));
+          }
+          process.stderr.write(
+            `parsed methods: ${paperId} (${parsed.methodology.length} techniques)\n`
+          );
+        }
+      }
     }
 
     // purge rebuilt papers (force) from existing arrays
     if (figRebuildIds.size) {
       figures = figures.filter((f) => !figRebuildIds.has(f.paperId));
       arcs = arcs.filter((a) => !figRebuildIds.has(a.paperId));
+    }
+    if (methRebuildIds.size) {
+      methodology = methodology.filter((m) => !methRebuildIds.has(m.paperId));
     }
 
     // embed new figures
@@ -445,6 +481,34 @@ async function main() {
       }
     }
 
+    // embed new methodology records
+    if (newMethods.length) {
+      process.stderr.write(
+        `embedding ${newMethods.length} methodology records via ${provider} (${dimensions}d)…\n`
+      );
+      const apiKey = providerApiKey(config, provider);
+      const texts = newMethodTexts.map((t) => String(t).slice(0, 8000));
+      const { vectors, apiCalls } = await embedMany(texts, {
+        provider,
+        dimensions,
+        apiKey,
+        batchSize: 100,
+        taskType: corpusTaskType,
+        onProgress: (done, total) => process.stderr.write(`  embedded methods ${done}/${total}\r`),
+      });
+      process.stderr.write("\n");
+      for (let i = 0; i < newMethods.length; i++) newMethods[i].embedding = vectors[i];
+      summary.api_calls += apiCalls;
+      if (provider === "openai") {
+        const totalChars = texts.reduce((s, t) => s + t.length, 0);
+        const tokens = Math.ceil(totalChars / CHARS_PER_TOKEN);
+        summary.estimated_cost_usd = +(
+          summary.estimated_cost_usd +
+          (tokens / 1e6) * OPENAI_USD_PER_MTOK
+        ).toFixed(6);
+      }
+    }
+
     const mergedFigures = figures.concat(newFigures);
     const mergedArcs = arcs.concat(newArcs);
     writeFigureStore(dir, { figures: mergedFigures, figureArcs: mergedArcs });
@@ -454,6 +518,18 @@ async function main() {
       `figure store written: ${mergedFigures.length} figures / ${mergedArcs.length} arcs ` +
         `(added ${newFigures.length} figs, ${newArcs.length} arcs)\n`
     );
+
+    // methodology store: only (re)write when there is methodology to persist so
+    // figure-only corpora never grow an empty methodology.jsonl.
+    const mergedMethods = methodology.concat(newMethods);
+    summary.methods_added = newMethods.length;
+    if (existingMethodPaperIds.size > 0 || newMethods.length > 0) {
+      writeMethodologyStore(dir, { methodology: mergedMethods });
+      process.stderr.write(
+        `methodology store written: ${mergedMethods.length} records ` +
+          `(added ${newMethods.length}, skipped ${summary.methods_skipped})\n`
+      );
+    }
   }
 
   console.log(JSON.stringify(summary, null, 2));

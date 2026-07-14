@@ -10,7 +10,7 @@
     {
       "name": "paper-autopilot-open",
       "description": "Open edition of a battery / materials science paper-writing feedback-loop orchestrator. Onboarding wizard (auto-creates corpus folders, installs Node + Python deps, semi-automatically registers an institution library proxy, and builds own/field profiles with a corpus relationship report), dual RAG backend (local vector store by default, Supabase optional), self-built corpus from the user's own papers, and no external plugin hard-dependencies. Includes adversarial review (pa-forcing-questions, pa-spec-review-loop) — still alpha.",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "author": {
         "name": "SHSUN76",
         "email": "seondara@gmail.com"

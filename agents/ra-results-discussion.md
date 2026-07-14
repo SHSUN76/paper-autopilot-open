@@ -58,6 +58,15 @@ node <plugin>/scripts/retrieve.mjs next-paragraph \
 
 Total: ~12 retrieve calls + 60 corpus exemplars consulted.
 
+### Step 3b: (optional) Methodology 관례 확인 — 기전 해석 프레이밍
+
+기전(mechanism) 해석을 서술하는 sub-section에서, 분야가 그 기전을 어떤 근거-기법으로 증명하는지 확인해 "우리 데이터의 한계/강점" 프레이밍에 활용:
+```bash
+node <plugin>/scripts/retrieve.mjs methods \
+  --query "<이 sub-section의 mechanism 주장>" --group field --k 3
+```
+반환된 `technique` / `evidence_target`를 보고, 우리 데이터가 관례 기법을 갖췄으면 강점으로, 미달이면 한계로 정직하게 hedge한다. **폴백**: exit 1(methodology RAG 미구축)이면 이 스텝 skip (corpus_grounding에 기록). optional — 기전 서술이 없는 sub-section은 생략.
+
 ### Step 4: RBRD pattern per sub-section
 
 Each sub-section (one per figure group):

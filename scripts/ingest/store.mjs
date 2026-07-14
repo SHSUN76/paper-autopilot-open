@@ -9,6 +9,7 @@
 //   aitells.json      — [ { paperId, phrase, section?, context?, rationale? } ]
 //   figures.jsonl     — one figure object per line, includes `embedding` (number[]) — figure-set RAG
 //   figure-arcs.json  — [ { paperId, group, arcPattern, arcSummary, narrativeLogic, figureSequence[] } ]
+//   methodology.jsonl — one technique record per line, includes `embedding` (number[]) — methodology RAG
 //
 // Scale target: 10-100 papers, <=10k paragraphs. Brute-force cosine is plenty.
 
@@ -49,6 +50,15 @@ export const NARRATIVE_ROLES = new Set([
   "summary",
 ]);
 
+// methodology category enum (methodology RAG). Unknown/missing values default to
+// "standard" (with a warning at parse time) so the --category filter and the
+// corpus report stay on the two-value advanced/standard partition.
+export const METHOD_CATEGORIES = new Set(["standard", "advanced"]);
+export function normCategory(c) {
+  const s = (c == null ? "" : String(c)).toLowerCase();
+  return s === "advanced" ? "advanced" : "standard";
+}
+
 // ---- section normalizer (JS mirror of the SQL SECTION_NORMALIZER) ----------
 // Rule order matches retrieve.mjs's SQL CASE exactly.
 export function normalizeSection(name) {
@@ -87,6 +97,7 @@ export function storePaths(dir) {
     aitells: path.join(dir, "aitells.json"),
     figures: path.join(dir, "figures.jsonl"),
     figureArcs: path.join(dir, "figure-arcs.json"),
+    methodology: path.join(dir, "methodology.jsonl"),
   };
 }
 
@@ -128,6 +139,9 @@ export function loadFigures(dir) {
 }
 export function loadFigureArcs(dir) {
   return readJson(storePaths(dir).figureArcs, []);
+}
+export function loadMethodology(dir) {
+  return readJsonl(storePaths(dir).methodology);
 }
 
 // Load the whole store for the retrieve path. Throws a clear error if the
@@ -174,6 +188,19 @@ export function writeFigureStore(dir, { figures, figureArcs }) {
     figures.map((x) => JSON.stringify(x)).join("\n") + (figures.length ? "\n" : "")
   );
   fs.writeFileSync(p.figureArcs, JSON.stringify(figureArcs, null, 2));
+}
+
+// ---- methodology store writer (methodology RAG) ----------------------------
+// Separate from writeStore / writeFigureStore so paragraph- or figure-only
+// corpora never grow an empty methodology.jsonl; build-corpus only calls this
+// when there is methodology to persist (or update).
+export function writeMethodologyStore(dir, { methodology }) {
+  fs.mkdirSync(dir, { recursive: true });
+  const p = storePaths(dir);
+  fs.writeFileSync(
+    p.methodology,
+    methodology.map((x) => JSON.stringify(x)).join("\n") + (methodology.length ? "\n" : "")
+  );
 }
 
 // ---- report parsing --------------------------------------------------------
@@ -421,7 +448,61 @@ export function parseFigureReport(report, { paperGroup } = {}) {
     figureSequence,
   };
 
-  return { paperId, figures, arc, warnings };
+  // Optional top-level `methodology` block on the same figures report (v2.2.0+).
+  // Absent -> null (silently; the block is optional).
+  const methodology = parseMethodologyBlock(report, { paperId, paperGroup: pg, warnings });
+
+  return { paperId, figures, arc, methodology, warnings };
+}
+
+// ---- methodology block parsing (methodology RAG) ---------------------------
+// Parses the optional top-level `methodology` block carried on a
+// `<paper_id>.figures.json` report:
+//   { techniques: [{ technique, category, purpose, evidence_target, figures[],
+//                    instrument_notes }], analysis_pipeline }
+// Returns an array of per-technique records (the paper-common analysis_pipeline
+// replicated onto each) or null when the block is absent or carries no usable
+// technique. Missing / unknown fields are tolerated with a single warning line
+// each (block absent = silent, since the block is optional).
+export function parseMethodologyBlock(report, { paperId, paperGroup, warnings } = {}) {
+  const warn = warnings || [];
+  const pg = normGroup(paperGroup);
+  const block = report && report.methodology;
+  if (!block || typeof block !== "object") return null; // optional block absent
+  const pipeline = str(block.analysis_pipeline ?? block.analysisPipeline);
+  const rawTechs = arr(block.techniques);
+  if (rawTechs.length === 0) {
+    warn.push(`${paperId}: methodology block has no techniques[] array`);
+    return null;
+  }
+  const records = [];
+  for (const t of rawTechs) {
+    if (!t || typeof t !== "object") continue;
+    const technique = str(t.technique ?? t.name);
+    if (!technique) {
+      warn.push(`${paperId}: methodology technique missing 'technique' name — skipped`);
+      continue;
+    }
+    const rawCat = t.category;
+    if (rawCat == null || !METHOD_CATEGORIES.has(String(rawCat).toLowerCase())) {
+      warn.push(
+        `${paperId}/${technique}: category missing/invalid ('${rawCat == null ? "" : rawCat}') — defaulting to 'standard'`
+      );
+    }
+    records.push({
+      paperId,
+      paperGroup: pg,
+      technique,
+      category: normCategory(rawCat),
+      purpose: str(t.purpose),
+      evidenceTarget: str(t.evidence_target ?? t.evidenceTarget),
+      figures: arr(t.figures).map((x) => String(x)),
+      instrumentNotes: str(t.instrument_notes ?? t.instrumentNotes),
+      analysisPipeline: pipeline,
+      embedding: null, // filled by the builder
+    });
+  }
+  return records.length ? records : null;
 }
 
 // Compose the embedding text for a single figure record (figure-set RAG),
@@ -444,5 +525,18 @@ export function figureEmbeddingText(fig, { journal, year } = {}) {
     `[Caption] ${fig.caption || ""}\n` +
     `[Panels] ${panelsLine}\n` +
     `[Narrative context] ${fig.narrativeContext || ""}`
+  );
+}
+
+// Compose the embedding text for a single methodology record (methodology RAG),
+// following the confirmed one-line template:
+//   [Technique] {technique} ({category}) | [Purpose] {purpose} |
+//   [Evidence] {evidence_target} | [Pipeline] {analysis_pipeline}
+export function methodEmbeddingText(m) {
+  return (
+    `[Technique] ${m.technique || ""} (${m.category || ""}) | ` +
+    `[Purpose] ${m.purpose || ""} | ` +
+    `[Evidence] ${m.evidenceTarget || ""} | ` +
+    `[Pipeline] ${m.analysisPipeline || ""}`
   );
 }

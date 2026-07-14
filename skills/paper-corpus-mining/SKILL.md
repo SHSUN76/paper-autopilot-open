@@ -187,8 +187,11 @@ contract the ingest step consumes; do not rename them.
 
 Beyond per-paragraph tagging, this skill also emits a **figure-set** extraction — one
 structured record per paper describing every figure, its panels, what it proves, and how
-the figures chain into the paper's narrative arc. This is the vision counterpart of the
-paragraph pass and, like it, feeds `build-corpus.mjs`.
+the figures chain into the paper's narrative arc, plus an optional top-level **`methodology`**
+block that captures how the paper's analysis techniques (advanced vs standard) were used —
+each technique's purpose, the claim it proves (`evidence_target`), and the figures it pairs
+with. This is the vision counterpart of the paragraph pass and, like it, feeds
+`build-corpus.mjs`.
 
 - **Scope**: own and field papers only. **review** papers are excluded (they need
   domain-knowledge retrieval, not figure exemplars).
@@ -196,25 +199,28 @@ paragraph pass and, like it, feeds `build-corpus.mjs`.
   page vision (Read reads PDFs visually, max 20 pages/call — paginate), inspects each
   figure and its panels, judges each figure's narrative role, and assembles the arc.
   Runs on subscription credits → **$0 API cost**, a few minutes per paper.
-- **Output**: one `<paper_id>.figures.json` per paper, saved **next to** the paragraph
-  report in the same `_reports/<group>/` directory. `build-corpus.mjs` auto-detects it by
-  the `.figures.json` suffix (paragraph reports are `<paper_id>.json`) and loads it into
-  `figures.jsonl` + `figure-arcs.json`, queryable via `retrieve.mjs figures` /
-  `figure-arcs`.
+- **Output**: one `<paper_id>.figures.json` per paper (figures + arc + optional
+  `methodology`), saved **next to** the paragraph report in the same `_reports/<group>/`
+  directory. `build-corpus.mjs` auto-detects it by the `.figures.json` suffix (paragraph
+  reports are `<paper_id>.json`) and loads it into `figures.jsonl` + `figure-arcs.json`
+  (plus a methods index from the `methodology` block), queryable via `retrieve.mjs figures`
+  / `figure-arcs` / `methods`.
 - **Schema + procedure**: follow `references/figure_extraction.md` exactly — it holds the
-  canonical figure-report schema (identical field names to the copy in
-  `skills/onboarding/references/corpus-build.md`), the 5-step extraction procedure, the
-  `narrative_role` (9-value enum) and `figure_type` controlled vocab, and the
-  hallucination guards (verbatim captions, caption-cross-checked `quantitative_claims`,
-  "(불확실)" for uncertain panels). Conform to that schema exactly — the field names are the
-  contract the ingest step consumes; do not rename them.
+  canonical figure-report schema **and the optional top-level `methodology` block** (identical
+  field names to the copy in `skills/onboarding/references/corpus-build.md`), the 6-step
+  extraction procedure, the `narrative_role` (9-value enum) and `figure_type` controlled
+  vocab, the `methodology` `category` (advanced/standard) rubric, and the hallucination guards
+  (verbatim captions, caption-cross-checked `quantitative_claims`, "(불확실)" for uncertain
+  panels, paper-stated techniques only with body-grounded `purpose`/`evidence_target`). Conform
+  to that schema exactly — the field names are the contract the ingest step consumes; do not
+  rename them.
 
 ## Reference files
 
 - `references/extraction-template.md` — Full JSON schema for Stage 1 with field-by-field guidance
 - `references/report-template.md` — Stage 3 final report structure
 - `references/paragraph_extraction.md` — Canonical paragraph-level extraction schema (input to `build-corpus.mjs`)
-- `references/figure_extraction.md` — Canonical figure-vision (Stage 1V) schema + extraction procedure + vocab + hallucination guards (own/field only; input to `build-corpus.mjs`)
+- `references/figure_extraction.md` — Canonical figure-vision (Stage 1V) schema + optional `methodology` block + extraction procedure + vocab + hallucination guards (own/field only; input to `build-corpus.mjs`)
 - `scripts/aggregate.py` — Stage 2 deterministic aggregation script
 
 ## Why this skill exists

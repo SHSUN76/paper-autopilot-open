@@ -30,6 +30,13 @@ node <plugin>/scripts/retrieve.mjs paragraphs \
 
 Also try `--claim method_description` filter. Identify 2-4 corpus papers with directly applicable protocol parameters.
 
+또한 methodology RAG로 gap의 "채워야 할 figure" 증명 목표(evidence_target)에 맞는 기법·조건 exemplar를 병행 검색:
+```bash
+node <plugin>/scripts/retrieve.mjs methods \
+  --query "<figure가 증명할 목표 = evidence_target>" --k 5
+```
+반환된 `technique` / `purpose` / `analysis_pipeline` / `figures`로 어떤 측정·분석이 그 증명 목표에 관례인지 파악해 SOP의 측정·분석 계획에 우선 반영하고, 출처를 source_log.md에 기록. **폴백**: `methods` 커맨드가 exit 1(methodology.jsonl 미구축)이면 skip하고 문단 method_description 검색만으로 진행 — source_log.md에 "methodology RAG 미구축 → 폴백" 기록.
+
 ### Step 3: OA paper supplementation (선택)
 
 If corpus is insufficient (rare measurement, niche sub-domain):

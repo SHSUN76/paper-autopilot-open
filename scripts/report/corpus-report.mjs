@@ -31,6 +31,7 @@ import {
   cosine,
   loadFigures,
   loadFigureArcs,
+  loadMethodology,
   normGroup,
 } from "../ingest/store.mjs";
 import { computeStyleProfile, computeFieldProfile } from "../ingest/profiles.mjs";
@@ -403,6 +404,10 @@ function main() {
   const figureArcs = loadFigureArcs(dir);
   const figuresHtml = figures.length ? renderFigures(figures, figureArcs) : null;
 
+  // ---- methodology section (only when a methodology corpus exists) ---------
+  const methods = loadMethodology(dir);
+  const methodologyHtml = methods.length ? renderMethodology(methods) : null;
+
   // ---- assemble ------------------------------------------------------------
   const provider = (store.meta && store.meta.embedding) || {};
   const nowIso = new Date().toISOString();
@@ -419,10 +424,12 @@ function main() {
     mapSvg,
     statsHtml,
     figuresHtml,
+    methodologyHtml,
     edgeCount: edges.length,
     mapCount: mapParas.length,
     pcaNote,
     figureCount: figures.length,
+    methodCount: methods.length,
   });
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -651,10 +658,43 @@ function renderFigures(figures, figureArcs) {
   );
 }
 
+// ---- methodology section (methodology RAG) ---------------------------------
+// advanced / standard 기법 상위 목록을 막대 두 개로 렌더. methodology.jsonl이
+// 없으면 호출되지 않음(main에서 가드).
+function renderMethodology(methods) {
+  const advCounts = new Map();
+  const stdCounts = new Map();
+  for (const m of methods) {
+    const tech = m.technique || "(unknown)";
+    const target = m.category === "advanced" ? advCounts : stdCounts;
+    target.set(tech, (target.get(tech) || 0) + 1);
+  }
+  const toRows = (mp) =>
+    [...mp.entries()]
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+      .slice(0, 12)
+      .map(([label, value]) => ({ label, value }));
+  const advRows = toRows(advCounts);
+  const stdRows = toRows(stdCounts);
+  const advChart = advRows.length
+    ? barChartSvg("advanced 기법 상위", advRows, "#b5548a")
+    : `<p class="empty">advanced 기법 없음</p>`;
+  const stdChart = stdRows.length
+    ? barChartSvg("standard 기법 상위", stdRows, "#548ab5")
+    : `<p class="empty">standard 기법 없음</p>`;
+  return (
+    `<div class="grid">` +
+    `<div class="card"><h3>${advChart}</h3></div>` +
+    `<div class="card"><h3>${stdChart}</h3></div>` +
+    `</div>`
+  );
+}
+
 function renderPage(ctx) {
   const {
     dir, nowIso, kst, provider, counts, groups, threshold,
-    networkSvg, mapSvg, statsHtml, figuresHtml, edgeCount, mapCount, pcaNote, figureCount,
+    networkSvg, mapSvg, statsHtml, figuresHtml, methodologyHtml,
+    edgeCount, mapCount, pcaNote, figureCount, methodCount,
   } = ctx;
   const css = `
 :root{--fg:#23272e;--muted:#6b7280;--line:#e4e7eb;--bg:#f7f8fa;--card:#fff;}
@@ -724,6 +764,11 @@ document.querySelectorAll('.graph g > *').forEach(function(el){
       ? `<section><h2>4. Figure 구성 분석 (figure-set RAG)</h2>` +
           `<p class="hint">figure_type / narrative_role 분포와 논문별 아크 구성. figure ${figureCount || 0}개.</p>` +
           `${figuresHtml}</section>`
+      : "") +
+    (methodologyHtml
+      ? `<section><h2>5. 분석 기법 구성 (methodology RAG)</h2>` +
+          `<p class="hint">advanced / standard 기법 상위 목록. 기법 ${methodCount || 0}건.</p>` +
+          `${methodologyHtml}</section>`
       : "") +
     `</main>` +
     `<footer>paper-autopilot-open · corpus-report.mjs · 논문 ${counts && counts.papers != null ? counts.papers : "?"}편 / 문단 ${counts && counts.paragraphs != null ? counts.paragraphs : "?"}개 (own ${groups && groups.own || 0} · field ${groups && groups.field || 0} · review ${groups && groups.review || 0}) · 완전 self-contained (외부 네트워크 참조 없음)</footer>` +

@@ -28,6 +28,8 @@ You normally don't hand-write `institution_proxy_url`. The onboarding wizard (Ph
 - **Host-rewriting proxies can't be auto-registered.** If your proxy merges the origin domain into the hostname (e.g. `www-nature-com.proxy.univ.ac.kr`), the `{prefix}{URL}` pattern can't express it and Tier 2 can't auto-convert it. In that case leave `institution_proxy_url` unset and rely on Tier 1 (IP-based) access.
 - If Playwright MCP is unavailable during onboarding, you enter the pattern manually from the three example forms (EZproxy / OpenAthens / redirector).
 
+**Requirement — install Playwright MCP:** Tiers 1 and 2 need the Playwright MCP server. Onboarding installs it on consent (Phase 1c) with `claude mcp add playwright --scope user -- npx -y @playwright/mcp@latest` (then `npx -y playwright install chromium`). Its browser tools load only after a Claude Code restart — until then, fall back to WebFetch for open access only.
+
 ## Why the Order Matters
 
 The tool you choose determines *which IP* the request originates from, which determines *which subscription* the publisher sees:

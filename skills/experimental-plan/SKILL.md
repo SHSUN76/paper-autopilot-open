@@ -122,6 +122,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --k 5
 ```
 
+또한 methodology RAG로 gap figure의 증명 목표(evidence_target)에 맞는 기법·조건 exemplar를 병행 검색 (미구축 시 exit 1 → 문단 검색만으로 폴백):
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" methods \
+  --query "<figure 증명 목표>" --k 5
+```
+
 `references/source-priority.md`에 우선순위 정의 — 항상 local corpus 먼저 시도.
 
 **Phase 2.2 — Open-access reference paper 확보**

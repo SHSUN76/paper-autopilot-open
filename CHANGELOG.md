@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/) / [Semantic Versioning](
 
 ---
 
+## [2.2.0] — 2026-07-14
+
+Playwright auto-install + methodology RAG — onboarding now installs the paper-access browser dependency for you, and the figure vision pass additionally captures *how* each paper used its analysis techniques.
+
+### Added
+
+- **Playwright MCP auto-install** — onboarding Phase 1c detects the Playwright MCP (`mcp__playwright__browser_*`) and, if missing, installs it on consent via `claude mcp add playwright --scope user -- npx -y @playwright/mcp@latest`, then (separate consent) the browser binary via `npx -y playwright install chromium` (~130 MB). MCP tools load only **after a Claude Code restart**, so Phase 2.4 institution-proxy registration gracefully skips (manual fallback preserved) with a "restart, then `/paper-autopilot-open:onboard config` to resume" notice. `paper-access` and INSTALL.md now document the one-line install command.
+- **Methodology RAG** — the figure vision pass now also extracts an optional top-level `methodology` block into `<paper_id>.figures.json`: each analysis technique's `category` (advanced vs standard), its `purpose`, the claim it proves (`evidence_target`, linked to the paper's argument), and the figures it pairs with, plus an `analysis_pipeline` summary. `build-corpus.mjs` loads it into a methods index (`methods_added` in the build summary), queryable via the new `retrieve.mjs methods --query … [--technique --category advanced|standard --group --k]` command — so the writer can retrieve *how a technique was used to prove a claim* in the field, not just figure layouts. Canonical schema + advanced/standard rubric + hallucination guards live in `paper-corpus-mining/references/figure_extraction.md` (mirrored field-for-field in `onboarding/references/corpus-build.md`).
+
+---
+
 ## [2.1.0] — 2026-07-14
 
 Onboarding hands-off upgrade — the wizard now does the setup labor so the user's only manual step is dropping PDFs into a folder.

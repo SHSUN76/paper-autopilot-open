@@ -10,12 +10,12 @@ Claude Code용 **배터리/재료과학 논문 작성 feedback-loop 오케스트
 - **G1–G6 결정 게이트** — 오케스트레이터가 이름 붙은 게이트(scaffold 후, mockup 후, plan 후, simulation 후, evolve 후, 투고 전)에서 멈춘다. 게이트별 `ask`/`auto`/`mixed` 정책을 자연어로 지정.
 - **적대적 spec 리뷰 (alpha)** — `pa-forcing-questions`가 모호한 개념을 specific해질 때까지 밀어붙이고, `pa-spec-review-loop`가 figure set / SOP / 초안을 다차원 채점하고 수정 루프를 돈다. (alpha: 스킬 로직 + mock dogfood 검증 완료, 실 reviewer dispatch 검증은 아직 보류.)
 - **self-built corpus 기반 듀얼 RAG** — 검색 corpus를 **본인 논문**에서 직접 만든다. own·field에 더해 (선택) **review 논문 그룹**(≤5편, 분야 전반 빠른 파악용 — 문단 태깅·임베딩만 하고 스타일 프로파일·figure vision에서는 제외)을 넣을 수 있다. 빌드 시 프로파일 2종을 자동 생성한다: **own 작문 스타일 프로파일**(voice·hedge·phrasing exemplar)과 **field 분야 지식 프로파일**(연도 범위·주요 저널, `--since` 필터로 최신 흐름). 백엔드는 기본 `local`(온디스크 벡터스토어, 외부 DB 불필요), 선택 `supabase`(본인 프로젝트), 또는 `disabled`.
-- **vision 기반 논문·figure 정밀 분석** — own/field 논문마다 Claude Code 서브에이전트가 PDF를 페이지 vision으로 정독(구독 크레딧, API 비용 $0)해 figure report를 만든다: 패널별 내용, figure별 증명 메시지, 서사 역할, figure들이 논문 서사를 잇는 아크.
-- **figure-set RAG (figure 아크 exemplar 검색)** — 이 figure report가 검색 가능한 figure 인덱스(`figures.jsonl`)와 아크 라이브러리(`figure-arcs.json`)를 만들어, 새 논문의 figure set을 설계할 때 `retrieve.mjs figures`/`figure-arcs`로 분야의 exemplar figure 아크를 검색할 수 있다.
+- **vision 기반 논문·figure 정밀 분석** — own/field 논문마다 Claude Code 서브에이전트가 PDF를 페이지 vision으로 정독(구독 크레딧, API 비용 $0)해 figure report를 만든다: 패널별 내용, figure별 증명 메시지, 서사 역할, figure들이 논문 서사를 잇는 아크, 그리고 논문이 분석 기법을 어떻게 썼는지 담는 optional `methodology` 블록.
+- **figure 구성 + methodology(고도분석 사용 맥락) RAG** — 이 report가 검색 가능한 figure 인덱스(`figures.jsonl`)·아크 라이브러리(`figure-arcs.json`)와 함께, 각 분석 기법(advanced vs standard)이 **무엇을 증명하려고**(`evidence_target`) 어떤 목적으로 어떤 figure와 짝지어 쓰였는지를 담는 methods 인덱스를 만든다. 새 논문의 figure set·분석 전략을 설계할 때 `retrieve.mjs figures`/`figure-arcs`/`methods`로 분야의 exemplar figure 아크와 고도분석 기법 사용 맥락을 함께 검색할 수 있다.
 - **corpus 관계도 리포트** — 온보딩 빌드가 own↔field 관계·섹션/claim/move 분포를 시각화한 단일 `corpus-report.html`을 생성.
 - **번들 툴체인** — `ppt-image`(Gemini figure mockup), `docx`(pandoc 변환), `parse`(PDF 파싱, STORM 선택), `review-paper`(6-agent 심사), `submission-prep`(cover letter + 투고 체크). 외부 플러그인 불필요.
 - **Materials Project 통합** — 결정구조·물성 실데이터 grounding (`materials-project` 스킬, 선택 `materials_project` API 키).
-- **하이-오프 온보딩 마법사** — `/paper-autopilot-open:onboard`가 Node+Python 의존성 설치, config 작성, corpus 폴더 자동 생성, 기관 도서관 프록시 반자동 등록(로그인은 브라우저에서 직접 — 자격증명은 세션에 남지 않음), corpus+프로파일+리포트 빌드까지 처리. 사용자가 손으로 할 일은 own ~5편 + field ~5편 PDF(+ 선택 review ≤5편)를 폴더에 넣는 것뿐. JSON을 손으로 편집할 필요 없음.
+- **하이-오프 온보딩 마법사** — `/paper-autopilot-open:onboard`가 Node+Python 의존성 설치, Playwright MCP 동의 시 자동 설치(`claude mcp add playwright …`, Claude Code 재시작 후 로드), config 작성, corpus 폴더 자동 생성, 기관 도서관 프록시 반자동 등록(로그인은 브라우저에서 직접 — 자격증명은 세션에 남지 않음), corpus+프로파일+리포트 빌드까지 처리. 사용자가 손으로 할 일은 own ~5편 + field ~5편 PDF(+ 선택 review ≤5편)를 폴더에 넣는 것뿐. JSON을 손으로 편집할 필요 없음.
 - **버전 관리** — 모든 산출물이 `[YYMMDD_내용]` 버전 폴더에 저장되고, 옛 버전은 덮어쓰지 않는다.
 
 ## 파이프라인
