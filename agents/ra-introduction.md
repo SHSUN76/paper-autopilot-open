@@ -31,15 +31,47 @@ Read `<plugin>/references/style-guide.md`. Internalize §1-§8.
 - `<paper>/mockup/<latest>/figure_set.md` (Fig 1-2 set up problem)
 - `<paper>/output/aw-sessions/<id>/context_analysis.md` if exists
 
-### Step 3: RAG corpus retrieval (MANDATORY)
+### Step 2b: Field knowledge framing (field-profile) — MANDATORY
 
 ```bash
+node <plugin>/scripts/retrieve.mjs field-profile
+```
+Returns `{papers, paragraphs, years{min,max,histogram}, journals[{name,count}], claim_by_section, top_method_vocabulary, top_vocabulary}` from the **field** (domain) corpus group. Use it to frame the Introduction against the field's current state:
+- **years** → note the recency window; set `RECENT = years.max − 4` for the `--since` filter below.
+- **journals** → the venues that dominate the field (framing / citation expectations).
+- **top_method_vocabulary / top_vocabulary** → adopt field-current terminology.
+- If `papers: 0` + a note (empty field corpus) → skip framing, use the bundled statistics, and retrieve without `--group` / `--since`.
+
+`field-profile` and the `--group` / `--since` options are **local RAG mode only** (`rag.mode: local`).
+
+### Step 3: RAG corpus retrieval (MANDATORY)
+
+Introduction retrieval is routed by narrative purpose (v2.1). **배경·overview 서술** (분야 전체 상태, 왜 중요한가) 은 리뷰 논문이 corpus에 있으면 `--group review`를 우선한다 — 리뷰 논문은 분야를 종합하므로 배경 프레이밍에 최적:
+```bash
+# Background / field overview → review group (리뷰 corpus 존재 시 우선)
+node <plugin>/scripts/retrieve.mjs paragraphs \
+  --query "<your central claim / field framing>" \
+  --section Introduction --group review --k 3
+```
+`--group review`가 `papers: 0` + note(리뷰 corpus 미구축)를 반환하면 이 배경 검색을 생략하고 아래 field 검색으로 대체한다 (fallback을 `corpus_grounding`에 기록).
+
+**구체 선행연구 대비** (specific prior-work comparison) 은 **content** → field group에서 최근 5년 편향으로 검색:
+```bash
+# Content / specific prior-work comparison → field, recent 5 yr
 node <plugin>/scripts/retrieve.mjs paragraphs \
   --query "<your central claim>" \
-  --section Introduction --k 5
+  --section Introduction --group field --since <RECENT> --k 5
 ```
+For the contribution ("Here, we …") sentence, borrow **phrasing** from the user's own voice (style reference only):
+```bash
+# Phrasing / contribution voice → own
+node <plugin>/scripts/retrieve.mjs paragraphs \
+  --query "<contribution nugget>" \
+  --section Introduction --group own --k 3
+```
+If a group returns `papers: 0` + a note, drop `--group` (and `--since`) for that call and use full-corpus retrieval; record the fallback in `corpus_grounding`.
 
-Read 5 corpus exemplars. Note their patterns:
+Read the corpus exemplars. Note their patterns:
 - Opening hook (broad → narrow)
 - Citation density
 - Hedge level
@@ -80,6 +112,8 @@ Apply style rules:
 ## Constraints
 
 - **MANDATORY corpus retrieve before writing** — audit trail in `corpus_grounding` field
+- **MANDATORY field-profile framing before writing** — record the field years window, dominant journals, `--group` / `--since` used per call, and any empty-corpus (`papers: 0`) fallback in `corpus_grounding`. own group is used for **phrasing reference only**, not content.
+- **(v2.1) 그룹 라우팅** — 배경·overview 서술은 `--group review`(리뷰 corpus 존재 시) 우선, 구체 선행연구 대비는 `--group field`(+`--since <RECENT>`), 기여 문장 phrasing은 `--group own`. review corpus 미구축(`papers: 0`) 시 field로 폴백하고 `corpus_grounding`에 기록.
 - **Style guide compliance** — self-check before output
 - **No fabricated citations** — every citation has DOI lookup option
 - **Hedge level: balanced** — too hedged ("might possibly suggest") or too strong ("we definitively prove") both flagged

@@ -37,11 +37,14 @@ The corpus RAG backend is selected in `~/.claude/paper-autopilot-open/config.jso
 | Component | Default (`rag.mode: local`) | Optional (`rag.mode: supabase`) |
 |---|---|---|
 | Store | Local vector store at `rag.local_corpus_dir` (JSON/JSONL, no external DB) | PostgreSQL + pgvector (user's own Supabase project) |
-| Embedding | `embedding.provider`: `gemini` (gemini-embedding-001) or `openai` (text-embedding-3-large), 1024 dim | same |
-| Coverage | User-built corpus (own + field papers via `scripts/ingest/build-corpus.mjs`) | user-ingested via `scripts/ingest/ingest-supabase.mjs` |
+| Embedding | `embedding.provider`: `gemini` (gemini-embedding-001) or `openai` (text-embedding-3-large), 3072 dim (default) | same |
+| Coverage | User-built corpus (own + field + review papers via `scripts/ingest/build-corpus.mjs`) | user-ingested via `scripts/ingest/ingest-supabase.mjs` |
 | Tables/records | `paragraphs.jsonl`, `moves.jsonl`, `vocabulary.json`, `aitells.json` | `CorpusParagraph`, `CorpusMove`, `CorpusAiTell`, `CorpusVocabulary` |
+| Figure exemplars | `figures.jsonl` — per-figure records (`figure_type[]`, `narrative_role`, `panel_count`, `panel_grid`, `caption`, `key_message`, `narrative_context`) | `CorpusFigure` |
+| Figure arcs | `figure-arcs.json` — per-paper figure sequence + `arc_pattern` / `arc_summary` / `narrative_logic` (전량 로드용) | `CorpusFigureArc` |
 | Bundled statistics | `references/corpus-evidence.md` — aggregate statistics from a 108-paper battery corpus, always available without any DB | same |
-| Query CLI | `scripts/retrieve.mjs` — commands: `paragraphs`, `next-paragraph`, `vocabulary`, `aitells`, `section-distribution`, `move-transitions` | same |
+| Query CLI | `scripts/retrieve.mjs` — commands: `paragraphs`, `next-paragraph`, `vocabulary`, `aitells`, `section-distribution`, `move-transitions`, `style-profile`, `field-profile`, `figures`, `figure-arcs`; options on `paragraphs`: `--group own\|field\|review`, `--since <year>` (local only); `figures` options: `--query`, `--type <figure_type>`, `--role <narrative_role>`, `--group own\|field`, `--k`; `figure-arcs` options: `--group field` (전체 아크 배열 반환) | same (`--group` / `--since` ignored in supabase mode) |
+| Group profiles | `style-profile.json` (own 작문 스타일) / `field-profile.json` (분야 지식) — build-corpus가 자동 생성, `retrieve.mjs style-profile` / `field-profile`로 조회 | local 전용 |
 
 If `rag.mode: disabled` or the corpus is not built yet, reviewer rules fall back to the bundled aggregate statistics only, and retrieval-grounded drafting (invariant #9) must warn the user and degrade gracefully.
 
@@ -53,6 +56,16 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
 Should return 3 corpus paragraphs with `paperId`, `text_excerpt`, similarity scores. If empty or errors → check `~/.claude/paper-autopilot-open/config.json` for the embedding provider key (`api_keys`) and DB connection (`rag.supabase`); otherwise the DB is healthy.
 
 **Sub-domain coverage caveat**: corpus is mostly LIB (NCM/NCA/LCO + Si/graphite + liquid electrolyte). Na-ion, K-ion, redox flow, solid-state have thin coverage — agents should caveat suggestions in those sub-domains.
+
+### What this RAG does and does not do
+
+This is **not** model fine-tuning — the base model's weights are unchanged. It is two mechanisms layered on top of the model:
+
+1. **Profile-conditioning** — `style-profile` / `field-profile` inject the user's own writing statistics (voice, hedge-by-claim, paragraph length, vocabulary) and the field's knowledge frame (years, dominant journals, method vocabulary) into the drafter / reviewer **instructions** — not into the weights.
+2. **Routed retrieval** — exemplars are fetched by purpose: `--group own` for **phrasing** (how the user words a move), `--group field` for **content** (what the field says, prior-work comparison), `--group review` for **background/overview** (field-synthesizing review papers).
+3. **Figure RAG** — 분야 논문의 figure 구성을 두 방식으로 제공: (a) 아크(논문당 figure 흐름)는 `figure-arcs`로 **전량 로드**(≈5편)해 LLM이 mechanism-first vs performance-first·main/SI 배분·figure 수를 직접 비교(5편 규모 최적 패턴), (b) 개별 figure exemplar는 `figures`로 메타데이터 필터(`--type`/`--role`) 후 벡터 유사도 검색. figure RAG 미구축 시 커맨드가 exit 1 → 에이전트는 번들 통계·자체 판단으로 폴백.
+
+Quality scales with corpus size: **own ≥ 5 papers** and **field ≥ 10 papers** are the practical minimums; re-calibrate the profiles once the corpus passes **~30 papers**. When the own corpus has few paragraphs, the style signal is weak and agents fall back to the bundled 108-paper statistics more often — profile-conditioning then has little effect and drafts revert toward the generic corpus norm. This is expected degradation, not a failure.
 
 ## Available sub-agents (bundled with this plugin)
 

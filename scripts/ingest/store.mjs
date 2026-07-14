@@ -1,12 +1,14 @@
 // paper-autopilot-open — local vector store (zero external deps).
 //
 // Layout (rag.local_corpus_dir):
-//   corpus-meta.json  — { version, created_at, updated_at, embedding:{provider,model,dimensions}, counts, paper_groups }
-//   papers.json       — [ { paperId, paperGroup:"own"|"field", title?, journal?, year?, source_file?, added_at } ]
+//   corpus-meta.json  — { version, created_at, updated_at, embedding:{provider,model,dimensions,task_type}, counts, paper_groups }
+//   papers.json       — [ { paperId, paperGroup:"own"|"field"|"review", title?, journal?, year?, source_file?, added_at } ]
 //   paragraphs.jsonl  — one paragraph object per line, includes `embedding` (number[])
 //   moves.jsonl       — one move object per line
 //   vocabulary.json   — [ { paperId, category, term, expansion?, context?, firstUseSection?, isDefinedAtFirstUse? } ]
 //   aitells.json      — [ { paperId, phrase, section?, context?, rationale? } ]
+//   figures.jsonl     — one figure object per line, includes `embedding` (number[]) — figure-set RAG
+//   figure-arcs.json  — [ { paperId, group, arcPattern, arcSummary, narrativeLogic, figureSequence[] } ]
 //
 // Scale target: 10-100 papers, <=10k paragraphs. Brute-force cosine is plenty.
 
@@ -24,6 +26,28 @@ export const str = (v) => (typeof v === "string" ? v : v == null ? null : String
 export const arr = (v) => (Array.isArray(v) ? v : []);
 export const intOr = (v, d) => (Number.isFinite(Number(v)) ? parseInt(v, 10) : d);
 export const intOrNull = (v) => (Number.isFinite(Number(v)) ? parseInt(v, 10) : null);
+
+// Paper groups: own (author's own papers, drives style-profile),
+// field (domain papers, drives field-profile knowledge), review (domain review
+// papers, knowledge-only; excluded from style-profile). Anything else -> own.
+export const PAPER_GROUPS = ["own", "field", "review"];
+export function normGroup(g) {
+  return g === "field" ? "field" : g === "review" ? "review" : "own";
+}
+
+// narrative_role enum for figures (figure-set RAG). Values outside this set are
+// accepted verbatim but warned about (schema drift tolerance).
+export const NARRATIVE_ROLES = new Set([
+  "motivation",
+  "design-concept",
+  "synthesis-structure",
+  "morphology",
+  "mechanism",
+  "performance",
+  "benchmark-comparison",
+  "device-validation",
+  "summary",
+]);
 
 // ---- section normalizer (JS mirror of the SQL SECTION_NORMALIZER) ----------
 // Rule order matches retrieve.mjs's SQL CASE exactly.
@@ -61,6 +85,8 @@ export function storePaths(dir) {
     moves: path.join(dir, "moves.jsonl"),
     vocabulary: path.join(dir, "vocabulary.json"),
     aitells: path.join(dir, "aitells.json"),
+    figures: path.join(dir, "figures.jsonl"),
+    figureArcs: path.join(dir, "figure-arcs.json"),
   };
 }
 
@@ -97,6 +123,12 @@ export function loadVocabulary(dir) {
 export function loadAitells(dir) {
   return readJson(storePaths(dir).aitells, []);
 }
+export function loadFigures(dir) {
+  return readJsonl(storePaths(dir).figures);
+}
+export function loadFigureArcs(dir) {
+  return readJson(storePaths(dir).figureArcs, []);
+}
 
 // Load the whole store for the retrieve path. Throws a clear error if the
 // corpus has not been built yet.
@@ -129,6 +161,19 @@ export function writeStore(dir, { meta, papers, paragraphs, moves, vocabulary, a
   fs.writeFileSync(p.moves, moves.map((x) => JSON.stringify(x)).join("\n") + (moves.length ? "\n" : ""));
   fs.writeFileSync(p.vocabulary, JSON.stringify(vocabulary, null, 2));
   fs.writeFileSync(p.aitells, JSON.stringify(aitells, null, 2));
+}
+
+// ---- figure store writer (figure-set RAG) ----------------------------------
+// Separate from writeStore so paragraph-only corpora never grow empty figure
+// artifacts; build-corpus only calls this when there are figures to persist.
+export function writeFigureStore(dir, { figures, figureArcs }) {
+  fs.mkdirSync(dir, { recursive: true });
+  const p = storePaths(dir);
+  fs.writeFileSync(
+    p.figures,
+    figures.map((x) => JSON.stringify(x)).join("\n") + (figures.length ? "\n" : "")
+  );
+  fs.writeFileSync(p.figureArcs, JSON.stringify(figureArcs, null, 2));
 }
 
 // ---- report parsing --------------------------------------------------------
@@ -293,17 +338,111 @@ export function parseReport(report, { group } = {}) {
     );
   }
 
-  // paper-level metadata (best effort — combined report may carry it)
+  // paper-level bibliographic metadata (best effort). Accepts either a nested
+  // `metadata` object (combined report) or top-level fields on the report, with
+  // metadata taking priority. Absent fields stay null (backward compatible).
   const meta = report.metadata || {};
   const paper = {
     paperId,
-    paperGroup: group === "field" ? "field" : "own",
-    title: str(meta.title),
-    journal: str(meta.journal),
-    year: intOrNull(meta.year),
+    paperGroup: normGroup(group),
+    title: str(meta.title ?? report.title),
+    journal: str(meta.journal ?? report.journal),
+    year: intOrNull(meta.year ?? report.year),
     source_file: str(report.source_file),
     added_at: new Date().toISOString(),
   };
 
   return { paperId, paper, paragraphs, moves, aitells, vocabulary, warnings };
+}
+
+// ---- figure report parsing (figure-set RAG) --------------------------------
+// Parses a `<paper_id>.figures.json` report (figure vision analysis output).
+// `paperGroup` should be the group resolved from the corresponding paragraph
+// report's paper when known; otherwise the caller passes the --group value.
+// Missing fields are tolerated (null / []) with a single warning line each.
+export function parseFigureReport(report, { paperGroup } = {}) {
+  const warnings = [];
+  const paperId = report.paper_id || report.paperId;
+  if (!paperId) return { error: "missing paper_id / paperId (figures report)" };
+  const pg = normGroup(paperGroup);
+
+  const rawFigs = arr(report.figures);
+  if (rawFigs.length === 0) warnings.push(`${paperId}: figures report has no figures[] array`);
+
+  const figures = [];
+  const figureSequence = [];
+  for (let i = 0; i < rawFigs.length; i++) {
+    const f = rawFigs[i] || {};
+    const figIndex = intOrNull(f.fig_index ?? f.figIndex);
+    const figId = str(f.fig_id ?? f.figId) || (figIndex != null ? `Fig${figIndex}` : `fig${i}`);
+    const narrativeRole = str(f.narrative_role ?? f.narrativeRole);
+    if (narrativeRole && !NARRATIVE_ROLES.has(narrativeRole)) {
+      warnings.push(`${paperId}/${figId}: unknown narrative_role '${narrativeRole}'`);
+    }
+    const rec = {
+      paperId,
+      figId,
+      figIndex,
+      figTotal: intOrNull(f.fig_total ?? f.figTotal),
+      isSi: !!(f.is_si ?? f.isSi),
+      figureType: arr(f.figure_type ?? f.figureType).map((x) => String(x)),
+      narrativeRole,
+      panelCount: intOrNull(f.panel_count ?? f.panelCount),
+      panelGrid: str(f.panel_grid ?? f.panelGrid),
+      panels: arr(f.panels).map((p) => ({
+        label: str(p && p.label),
+        type: str(p && p.type),
+        summary: str(p && p.summary),
+      })),
+      caption: str(f.caption),
+      keyMessage: str(f.key_message ?? f.keyMessage),
+      narrativeContext: str(f.narrative_context ?? f.narrativeContext),
+      quantitativeClaims: arr(f.quantitative_claims ?? f.quantitativeClaims).map((x) => String(x)),
+      domainTags: arr(f.domain_tags ?? f.domainTags).map((x) => String(x)),
+      paperGroup: pg,
+      embedding: null, // filled by the builder
+    };
+    figures.push(rec);
+    figureSequence.push({
+      figId: rec.figId,
+      figIndex: rec.figIndex,
+      figureType: rec.figureType,
+      narrativeRole: rec.narrativeRole,
+      keyMessage: rec.keyMessage,
+    });
+  }
+
+  const arc = {
+    paperId,
+    group: pg,
+    arcPattern: str(report.arc_pattern ?? report.arcPattern),
+    arcSummary: str(report.arc_summary ?? report.arcSummary),
+    narrativeLogic: str(report.narrative_logic ?? report.narrativeLogic),
+    figureSequence,
+  };
+
+  return { paperId, figures, arc, warnings };
+}
+
+// Compose the embedding text for a single figure record (figure-set RAG),
+// following the confirmed template (~300-400 token target). `journal` / `year`
+// come from the corresponding paper's bibliographic metadata when available.
+export function figureEmbeddingText(fig, { journal, year } = {}) {
+  const paperLabel = journal || fig.paperId || "";
+  const yr = year != null && year !== "" ? String(year) : "";
+  const domain = arr(fig.domainTags).join(", ");
+  const ftype = arr(fig.figureType).join("+");
+  const panelsLine = arr(fig.panels)
+    .map((p) => `(${p && p.label != null ? p.label : "?"}) ${(p && p.type) || ""}: ${(p && p.summary) || ""}`)
+    .join(" ");
+  return (
+    `[Paper] ${paperLabel} ${yr} | ${domain}\n` +
+    `[Figure ${fig.figIndex != null ? fig.figIndex : "?"}/${fig.figTotal != null ? fig.figTotal : "?"}] ` +
+    `type: ${ftype} | role: ${fig.narrativeRole || ""} | ` +
+    `panels: ${fig.panelCount != null ? fig.panelCount : "?"} (${fig.panelGrid || ""})\n` +
+    `[Key message] ${fig.keyMessage || ""}\n` +
+    `[Caption] ${fig.caption || ""}\n` +
+    `[Panels] ${panelsLine}\n` +
+    `[Narrative context] ${fig.narrativeContext || ""}`
+  );
 }

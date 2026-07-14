@@ -183,11 +183,38 @@ direct input to `scripts/ingest/build-corpus.mjs`, which reads
 paragraph reports, conform to that schema exactly — the field names are the
 contract the ingest step consumes; do not rename them.
 
+## Stage 1V — figure vision 분석 (own/field 전용)
+
+Beyond per-paragraph tagging, this skill also emits a **figure-set** extraction — one
+structured record per paper describing every figure, its panels, what it proves, and how
+the figures chain into the paper's narrative arc. This is the vision counterpart of the
+paragraph pass and, like it, feeds `build-corpus.mjs`.
+
+- **Scope**: own and field papers only. **review** papers are excluded (they need
+  domain-knowledge retrieval, not figure exemplars).
+- **How**: dispatch a Claude Code sub-agent per paper (5 at a time). It reads the PDF as
+  page vision (Read reads PDFs visually, max 20 pages/call — paginate), inspects each
+  figure and its panels, judges each figure's narrative role, and assembles the arc.
+  Runs on subscription credits → **$0 API cost**, a few minutes per paper.
+- **Output**: one `<paper_id>.figures.json` per paper, saved **next to** the paragraph
+  report in the same `_reports/<group>/` directory. `build-corpus.mjs` auto-detects it by
+  the `.figures.json` suffix (paragraph reports are `<paper_id>.json`) and loads it into
+  `figures.jsonl` + `figure-arcs.json`, queryable via `retrieve.mjs figures` /
+  `figure-arcs`.
+- **Schema + procedure**: follow `references/figure_extraction.md` exactly — it holds the
+  canonical figure-report schema (identical field names to the copy in
+  `skills/onboarding/references/corpus-build.md`), the 5-step extraction procedure, the
+  `narrative_role` (9-value enum) and `figure_type` controlled vocab, and the
+  hallucination guards (verbatim captions, caption-cross-checked `quantitative_claims`,
+  "(불확실)" for uncertain panels). Conform to that schema exactly — the field names are the
+  contract the ingest step consumes; do not rename them.
+
 ## Reference files
 
 - `references/extraction-template.md` — Full JSON schema for Stage 1 with field-by-field guidance
 - `references/report-template.md` — Stage 3 final report structure
 - `references/paragraph_extraction.md` — Canonical paragraph-level extraction schema (input to `build-corpus.mjs`)
+- `references/figure_extraction.md` — Canonical figure-vision (Stage 1V) schema + extraction procedure + vocab + hallucination guards (own/field only; input to `build-corpus.mjs`)
 - `scripts/aggregate.py` — Stage 2 deterministic aggregation script
 
 ## Why this skill exists

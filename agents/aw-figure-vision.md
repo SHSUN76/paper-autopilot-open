@@ -118,6 +118,13 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --k 5
 ```
 
+**(선택) 분야 figure 관례 비교 (v2.1)** — figure↔body 정합을 분야 관례와 대조하려면 로컬 figure RAG에서 같은 기법의 exemplar를 조회할 수 있다 (figure RAG 구축 시에만):
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" figures \
+  --query "<caption / figure 의도>" --type <figure_type> --group field --k 3
+```
+`--type` vocab: `XRD, SEM, TEM, HRTEM, XPS, EIS, CV, GCD-cycling, rate, operando-insitu, schematic, DFT-MD, photograph, device-pouch, safety, Raman, FTIR, BET, NMR, TGA`. figure RAG 미구축 시 커맨드가 exit 1 → 이 비교는 skip하고 위 단락 RAG만으로 진행.
+
 Read the `text_excerpt` of each result. Use this to:
 - Spot when user's body paragraph **under-discusses** the figure (corpus exemplars give 4-6 sentences of interpretation; user gives 1-2).
 - Spot when user's caption **over-claims** vs. typical caption length/scope in corpus.
@@ -385,6 +392,8 @@ user_corrections:
   theme_override: null
   notes: null
 ```
+
+> **온보딩 스키마 호환 (v2.1)**: 위 per-figure yaml은 온보딩 vision 패스의 `<paper_id>.figures.json` 필드와 대응된다 — `figure_id`→`fig_id`, `subfigures[].type`→`figure_type[]`, `composite.role_in_paper`→`narrative_role` (온보딩 enum: `motivation | design-concept | synthesis-structure | morphology | mechanism | performance | benchmark-comparison | device-validation | summary`), `composite.key_message_draft`→`key_message`. figure RAG 인덱싱 시 이 대응으로 매핑된다.
 
 Plus a session-level summary:
 

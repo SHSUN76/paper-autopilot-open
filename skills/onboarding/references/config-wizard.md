@@ -9,7 +9,7 @@
 | 언어 | `language` | `"ko"` \| `"en"` | AskUserQuestion | 필수 |
 | 타임존 | `timezone` | `"Asia/Seoul"` 등 IANA | AskUserQuestion | 필수 |
 | 논문 루트 | `papers_root` | 절대경로 문자열 | 대화 입력 | 필수 |
-| 제1저자 | `default_first_author` | 문자열 | 대화 입력 | 필수 |
+| 제1저자 | `default_first_author` | 문자열 | 대화 입력 — "논문 저자 표기용 영문 이름을 알려주세요 (예: Gildong Hong)" **한 질문만**, 답을 그대로 기입 | 필수 |
 | 대상 저널 | `default_target_journals` | 문자열 배열 | 대화 입력 | 필수 |
 | 게이트 정책 | `auto_gates_default` | `"ask"` \| `"auto"` \| `"mixed"` | AskUserQuestion | 필수(기본 ask) |
 | Gemini 키 | `api_keys.gemini` | 시크릿 문자열 | 대화 입력(마스킹) | 필수 |
@@ -17,8 +17,9 @@
 | Anthropic 키 | `api_keys.anthropic` | 시크릿 문자열 | 대화 입력(마스킹) | 선택 |
 | STORM 키 | `api_keys.storm_parse` | 시크릿 문자열 | 대화 입력(마스킹) | 선택 |
 | Tavily 키 | `api_keys.tavily` | 시크릿 문자열 | 대화 입력(마스킹) | 선택 |
+| Materials Project 키 | `api_keys.materials_project` | 시크릿 문자열 | 대화 입력(마스킹) | 선택 |
 | 임베딩 provider | `embedding.provider` | `"gemini"` \| `"openai"` | AskUserQuestion | 필수(기본 gemini) |
-| 임베딩 차원 | `embedding.dimensions` | `1024` | 고정 | 필수 |
+| 임베딩 차원 | `embedding.dimensions` | `3072` | 고정 | 필수 |
 | RAG 모드 | `rag.mode` | `"local"` \| `"supabase"` \| `"disabled"` | AskUserQuestion | 필수(기본 local) |
 | 로컬 corpus 경로 | `rag.local_corpus_dir` | 경로(기본 `~/.claude/paper-autopilot-open/corpus`) | 기본값 제시 | 필수 |
 | Supabase URL | `rag.supabase.database_url` | pooler URL | 대화 입력 | supabase 시 |
@@ -40,7 +41,7 @@
 
 **배치 B (RAG 백엔드 + 선택 기능 on/off)**
 - `rag.mode`: 옵션 `local (기본, 외부 DB 불필요)`, `supabase (본인 프로젝트)`, `disabled (RAG 없이)`
-- 선택 기능 활성화 여부(각각 yes/no): OpenAI 임베딩 / STORM 파싱 / Tavily 참조검색 / Supabase / 기관 프록시
+- 선택 기능 활성화 여부(각각 yes/no): OpenAI 임베딩 / STORM 파싱 / Tavily 참조검색 / Materials Project / Supabase / 기관 프록시
 
 "yes"로 답한 선택 기능만 이후 시크릿·값을 대화로 추가 수집한다.
 
@@ -77,6 +78,43 @@
 3. **스키마 적용 안내**: Supabase 대시보드 SQL Editor에서 `${CLAUDE_PLUGIN_ROOT}/scripts/setup/corpus-schema.sql`을 실행하도록 안내 (pgvector 확장 + 테이블 생성). 이 단계는 사용자가 브라우저에서 수동으로 한다.
 4. corpus 적재는 Phase 3에서 `build-corpus.mjs` 대신 `ingest-supabase.mjs`를 쓴다.
 
+## 5.5 기관 프록시 반자동 등록 (institution_proxy_url)
+
+`paper_access.institution_proxy_url`을 손으로 추측하지 않고, Playwright로 실제 구독 URL을 캡처해 자동 추출한다. SKILL.md Phase 2.4에서 참조한다.
+
+### 자격증명 취급 금지 원칙 (반드시 준수)
+
+- 사용자의 도서관 **ID·비밀번호·OTP를 대화로 받거나, 프로그램/스크립트로 입력하는 것을 절대 금지**한다.
+- 로그인은 **오직 사용자가 열린 브라우저에서 직접** 수행한다. 마법사는 로그인 완료 신호("완료")만 기다린다.
+- 이는 기관 SSO가 device fingerprinting·MFA를 쓰기 때문이기도 하고(프로그램 로그인은 실패·계정 잠금 위험), 자격증명이 세션 기록(transcript)에 남지 않게 하기 위함이다.
+
+### 절차
+
+1. **포털 URL 질문** (자유 입력): "소속 기관 도서관 포털 URL을 알려주세요 (건너뛰려면 '건너뜀')". 건너뛰면 `institution_proxy_url=""`로 두고 종료.
+2. **Playwright MCP 가용성 확인**: ToolSearch로 `mcp__playwright__browser_navigate`(및 `browser_snapshot`/`browser_evaluate`) 존재를 확인.
+   - **미가용 → 수동 입력 폴백**. 패턴 예시 3종 제시 후 직접 기입:
+     | 유형 | 패턴 예시 |
+     |------|-----------|
+     | EZproxy | `https://login.proxy.<univ>.ac.kr/login?url={URL}` |
+     | OpenAthens | `https://go.openathens.net/redirector/<domain>?url={URL}` |
+     | 리다이렉터 | `https://.../redirector.php?url={URL}` |
+     - `{URL}`은 원 논문 URL이 치환될 placeholder임을 설명.
+3. **가용 → 반자동 캡처**:
+   - `browser_navigate`로 포털 열기.
+   - 사용자에게 **직접 로그인** 요청(위 금지 원칙) → "완료" 대기.
+   - 로그인 후 포털의 전자저널 검색으로 **구독 논문 1편**을 열게 안내.
+   - `browser_snapshot` 또는 `browser_evaluate({ function: "() => location.href" })`로 현재 URL 캡처.
+4. **패턴 추출 규칙**:
+   | 캡처 URL 형태 | 판정 | 추출 패턴 |
+   |---------------|------|-----------|
+   | `...?url=<orig>` 또는 `...?qurl=<orig>` 쿼리 파라미터 있음 | 추출 가능 | 파라미터 값 앞부분 + `{URL}` (예: `https://login.proxy.univ.ac.kr/login?url={URL}`) |
+   | `go.openathens.net/redirector/<domain>?url=<orig>` | 추출 가능 | OpenAthens redirector 형식으로 패턴화 |
+   | **호스트 재작성형** `www-nature-com.proxy.univ.ac.kr/...` (원 도메인이 호스트명에 병합) | **추출 불가** | prefix 패턴화 불가 → 수동 안내 + paper-access 재작성형 한계 명시 |
+5. **검증**: 추출 패턴의 `{URL}`에 **다른 구독 논문 URL**을 넣어 `browser_navigate` → paper-access 페이월 감지기로 정상 접근(로그인 리다이렉트 루프·페이월 부재) 확인. 통과 시 `institution_proxy_url`에 기록, 실패 시 수동 폴백.
+6. **결과 요약**을 성공(반자동)/수동/건너뜀 중 하나로 판정해 Phase 5 표에 반영.
+
+> **호스트 재작성형 한계**: `institution_proxy_url`은 `{prefix}{URL}` 형태의 prefix-치환만 표현할 수 있다. 원 도메인을 호스트명에 병합·인코딩하는 재작성형 프록시는 이 패턴으로 표현 불가하며, paper-access Tier 2도 자동 변환하지 못한다. 이 경우 프록시 미설정으로 두고 Tier 1(IP 기반 직접 접근)만 사용한다.
+
 ## 6. 최종 config 구조 (예시 — 시크릿은 실제 값)
 
 ```json
@@ -92,9 +130,10 @@
     "openai": "",
     "anthropic": "",
     "storm_parse": "",
-    "tavily": ""
+    "tavily": "",
+    "materials_project": ""
   },
-  "embedding": { "provider": "gemini", "dimensions": 1024 },
+  "embedding": { "provider": "gemini", "dimensions": 3072 },
   "rag": {
     "mode": "local",
     "local_corpus_dir": "~/.claude/paper-autopilot-open/corpus",

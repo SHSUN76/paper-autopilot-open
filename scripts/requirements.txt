@@ -1,0 +1,5 @@
+# paper-autopilot-open Python dependencies (선택 기능별)
+PyMuPDF        # pdf-figure-extract: PDF figure 추출
+Pillow         # pdf-figure-extract: 이미지 처리
+python-docx    # docx 변환 후처리 (선택)
+requests       # storm_parse.py PDF 파싱 백엔드 (선택)

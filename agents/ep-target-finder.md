@@ -39,6 +39,14 @@ Extract metric ranges from real published results.
 If journal in table → use directly
 Else → fall back to corpus query + neighboring journal
 
+### Step 3b: (보조) 재료 고유 물성 기준값 — Materials Project
+
+target metric이 **재료 고유 물성의 이론적 상한/기준값**에 의존하면(예: 이론용량 계산용 밀도·분자량·산화상태, 상안정성 창(energy_above_hull), 밴드갭 기준), `materials-project` 스킬(`skills/materials-project/SKILL.md` + `references/api-recipes.md`)의 레시피로 MP를 **보조 소스**로 조회한다.
+
+- 용도 예: 이론용량 = F·n / (3.6·M) 계산에 필요한 정확한 몰질량·밀도, 안정상 판정(E_hull), DFT 밴드갭 기준값.
+- 출처 표기: target_metrics.md 통계 출처에 `(MP, mp-XXXX, accessed YYYY-MM-DD, DFT/GGA)` 명시. MP 값은 DFT 계산값 — 실험 target과 구분.
+- corpus/문헌 통계가 우선이며 MP는 **재료 상수 보조**일 뿐. 키 없음 또는 미등재면 skip하고 corpus/table만 사용(경고 표기).
+
 ### Step 4: 3-tier 목표 설정
 
 For each metric:

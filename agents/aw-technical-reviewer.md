@@ -92,6 +92,15 @@ Detect physically unrealistic claims:
 - Conductivity values within physical bounds for the material class.
 - Diffusion coefficients in plausible range (Li⁺ in oxide cathodes: 10⁻⁹ to 10⁻¹³ cm² s⁻¹; in liquid electrolyte: 10⁻⁶ to 10⁻⁵).
 
+### 6b. 재료 상수·물성 수치 fact-check (Materials Project)
+
+원고의 **결정구조·재료 물성 주장**(공간군, 격자상수, 밴드갭, formation energy, energy_above_hull/상안정성, 밀도, 탄성·자성 등)을 발견하면, `materials-project` 스킬(`skills/materials-project/SKILL.md` + `references/api-recipes.md`)의 레시피로 MP 실데이터를 조회해 대조한다.
+
+- 절차: 스킬 §1 키 로딩 → 레시피 1(summary, formula/mp-id) 조회 → 값 대조.
+- 대조 시 주의: MP 물성은 **GGA/GGA+U DFT 계산값**(밴드갭은 실험 대비 과소평가 경향) — 실험값과 단순 비교 금지, "DFT 대 실험" 맥락으로 판단.
+- 불일치는 severity(confirmed / needs-verification)와 함께 보고하고, 근거로 `(MP, mp-XXXX, accessed YYYY-MM-DD)`를 남긴다.
+- **키가 없으면(api_keys.materials_project 미설정) 이 단계는 skip하고 "MP fact-check 미수행(키 없음)"을 보고에 명시** — 값을 추정하지 않는다. 미등재 재료도 정직하게 "MP 미등재"로 표기.
+
 ### 7. Comparison fairness
 
 For "GIDE outperforms CDE" claims:

@@ -1,7 +1,7 @@
 {
   "name": "paper-autopilot-open",
-  "version": "2.0.0",
-  "description": "Open edition of a battery / materials science paper-writing feedback-loop orchestrator. Onboarding wizard, dual RAG backend (local vector store by default, Supabase optional), self-built corpus from the user's own papers, and no external plugin hard-dependencies. Idea + figure set → folder → mockup → academic-writing → experimental-plan → loop with version management. Includes adversarial review (pa-forcing-questions, pa-spec-review-loop) — still alpha: SKILL.md + mock dogfood verified, real reviewer dispatch verification deferred.",
+  "version": "2.1.0",
+  "description": "Open edition of a battery / materials science paper-writing feedback-loop orchestrator. Onboarding wizard (now auto-creates corpus folders, installs Node + Python deps, semi-automatically registers an institution library proxy, and builds own/field writing-style + field-knowledge profiles with a corpus relationship report), dual RAG backend (local vector store by default, Supabase optional), self-built corpus from the user's own papers, and no external plugin hard-dependencies. Idea + figure set → folder → mockup → academic-writing → experimental-plan → loop with version management. Includes adversarial review (pa-forcing-questions, pa-spec-review-loop) — still alpha: SKILL.md + mock dogfood verified, real reviewer dispatch verification deferred.",
   "author": {
     "name": "SHSUN76",
     "email": "seondara@gmail.com"

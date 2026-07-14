@@ -71,7 +71,7 @@ export function loadConfig() {
     embedding: {
       provider: process.env.PAO_EMBED_PROVIDER || embedding.provider || "gemini",
       dimensions: parseInt(
-        process.env.PAO_EMBED_DIMS || embedding.dimensions || 1024,
+        process.env.PAO_EMBED_DIMS || embedding.dimensions || 3072,
         10
       ),
     },

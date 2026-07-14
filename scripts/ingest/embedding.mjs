@@ -1,8 +1,12 @@
 // paper-autopilot-open — provider-abstracted text embeddings.
 //
+// Output dimensionality is driven by config.embedding.dimensions (default 3072)
+// and passed through to each provider — never hard-coded in this module.
+//
 // Providers:
-//   openai — text-embedding-3-large, dimensions=1024 (native array batching)
-//   gemini — gemini-embedding-001 (embedContent single / batchEmbedContents batch)
+//   openai — text-embedding-3-large (native `dimensions` param, default 3072)
+//   gemini — gemini-embedding-001 (`outputDimensionality`; 3072 is the model's
+//            native/default dimension, so no re-normalization is required)
 //   stub   — deterministic offline hash embedding (tests only, no network)
 //
 // gemini free tier exists (rate-limited); openai text-embedding-3-large is
@@ -52,8 +56,11 @@ async function embedOpenAI(texts, dims, apiKey) {
   return j.data.map((d) => d.embedding);
 }
 
-async function embedGemini(texts, dims, apiKey) {
+async function embedGemini(texts, dims, apiKey, taskType) {
   if (!apiKey) throw new Error("gemini embedding requires api_keys.gemini in config");
+  // taskType (RETRIEVAL_DOCUMENT for ingest, RETRIEVAL_QUERY for queries) is
+  // added to the request body only when provided — omitted keeps legacy behavior.
+  const tt = taskType ? { taskType } : {};
   // Single text -> embedContent (documented shape). Batch -> batchEmbedContents.
   if (texts.length === 1) {
     const res = await fetch(`${GEMINI_BASE}/${GEMINI_MODEL}:embedContent`, {
@@ -62,6 +69,7 @@ async function embedGemini(texts, dims, apiKey) {
       body: JSON.stringify({
         content: { parts: [{ text: texts[0] }] },
         outputDimensionality: dims,
+        ...tt,
       }),
     });
     if (!res.ok) {
@@ -78,6 +86,7 @@ async function embedGemini(texts, dims, apiKey) {
         model: `models/${GEMINI_MODEL}`,
         content: { parts: [{ text: t }] },
         outputDimensionality: dims,
+        ...tt,
       })),
     }),
   });
@@ -88,30 +97,33 @@ async function embedGemini(texts, dims, apiKey) {
   return j.embeddings.map((e) => e.values);
 }
 
-async function embedChunk(texts, provider, dims, apiKey) {
+async function embedChunk(texts, provider, dims, apiKey, taskType) {
   if (provider === "stub") return texts.map((t) => stubEmbed(t, dims));
-  if (provider === "openai") return embedOpenAI(texts, dims, apiKey);
-  if (provider === "gemini") return embedGemini(texts, dims, apiKey);
+  if (provider === "openai") return embedOpenAI(texts, dims, apiKey); // openai: no taskType concept
+  if (provider === "gemini") return embedGemini(texts, dims, apiKey, taskType);
   throw new Error(`Unknown embedding provider: ${provider}`);
 }
 
-// Embed a single text. Returns number[].
-export async function embedOne(text, { provider, dimensions, apiKey }) {
-  const [v] = await embedChunk([text], provider, dimensions, apiKey);
+// Embed a single text. Returns number[]. `taskType` (gemini-only) is ignored by
+// openai/stub. Queries should pass RETRIEVAL_QUERY when the corpus was built
+// with a task_type (see retrieve.mjs).
+export async function embedOne(text, { provider, dimensions, apiKey, taskType }) {
+  const [v] = await embedChunk([text], provider, dimensions, apiKey, taskType);
   return v;
 }
 
 // Embed many texts. Returns { vectors: number[][], apiCalls: number }.
-// Batches by batchSize (default 100). stub makes 0 API calls.
+// Batches by batchSize (default 100). stub makes 0 API calls. `taskType`
+// (gemini-only) is threaded through — ingest passes RETRIEVAL_DOCUMENT.
 export async function embedMany(
   texts,
-  { provider, dimensions, apiKey, batchSize = 100, onProgress } = {}
+  { provider, dimensions, apiKey, batchSize = 100, onProgress, taskType } = {}
 ) {
   const vectors = [];
   let apiCalls = 0;
   for (let i = 0; i < texts.length; i += batchSize) {
     const chunk = texts.slice(i, i + batchSize);
-    const vecs = await embedChunk(chunk, provider, dimensions, apiKey);
+    const vecs = await embedChunk(chunk, provider, dimensions, apiKey, taskType);
     for (const v of vecs) vectors.push(v);
     if (provider !== "stub") apiCalls += 1;
     if (onProgress) onProgress(vectors.length, texts.length);

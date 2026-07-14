@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS "CorpusSection" (
   voice           TEXT,
   "tensePattern"  TEXT,
   text            TEXT,
-  embedding       vector(1024)
+  embedding       vector(3072)
 );
 
 CREATE TABLE IF NOT EXISTS "CorpusParagraph" (
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS "CorpusParagraph" (
   "refsTables"        TEXT[] NOT NULL DEFAULT '{}',
   "refsPriorWork"     INTEGER NOT NULL DEFAULT 0,
   "aiTellPhrases"     TEXT[] NOT NULL DEFAULT '{}',
-  embedding           vector(1024)
+  embedding           vector(3072)
 );
 
 CREATE TABLE IF NOT EXISTS "CorpusMove" (
@@ -141,14 +141,20 @@ CREATE INDEX IF NOT EXISTS corpus_vocabulary_phrase_trgm  ON "CorpusVocabulary" 
 CREATE INDEX IF NOT EXISTS corpus_aitell_paper_idx      ON "CorpusAiTell" ("paperId");
 CREATE INDEX IF NOT EXISTS corpus_aitell_phrase_idx     ON "CorpusAiTell" (phrase);
 
--- HNSW vector index for paragraph cosine search
-CREATE INDEX IF NOT EXISTS corpus_paragraph_embedding_hnsw
-  ON "CorpusParagraph" USING hnsw (embedding vector_cosine_ops)
-  WITH (m = 16, ef_construction = 64);
-
-CREATE INDEX IF NOT EXISTS corpus_section_embedding_hnsw
-  ON "CorpusSection" USING hnsw (embedding vector_cosine_ops)
-  WITH (m = 16, ef_construction = 64);
+-- Vector cosine search index.
+-- NOTE: embeddings are vector(3072). pgvector's HNSW/IVFFlat indexes only
+-- support up to 2000 dimensions, so a vector(3072) column CANNOT be HNSW-indexed
+-- directly — the CREATE INDEX ... USING hnsw statements are intentionally
+-- omitted here. For a small corpus (a few thousand paragraphs) an exact
+-- sequential scan of the cosine distance is fast enough and is what runs by
+-- default. For a large corpus, cast to halfvec(3072) (which HNSW supports up to
+-- 4000 dims) and index the cast expression, e.g.:
+--
+--   CREATE INDEX IF NOT EXISTS corpus_paragraph_embedding_halfvec_hnsw
+--     ON "CorpusParagraph" USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)
+--     WITH (m = 16, ef_construction = 64);
+--
+-- (then query with `embedding::halfvec(3072) <=> $1::halfvec(3072)`).
 
 -- 4. Updated-at trigger for CorpusPaper --------------------------------
 CREATE OR REPLACE FUNCTION public.pao_set_updated_at()

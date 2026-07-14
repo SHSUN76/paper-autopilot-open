@@ -40,6 +40,14 @@ When hedges drift outside this distribution, prose feels AI-generated or unconvi
    | interpretation | mild or moderate | 76% |
    | **caveat** | **moderate** | 53% |
 
+3b. **Personal hedge calibration (own profile)** — fetch the user's style profile:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" style-profile
+   ```
+   - **If `hedge_by_claim` is present AND the own corpus has `paragraphs ≥ 100`** → treat the profile's `hedge_by_claim` as the user's **personal hedge baseline** and report it **alongside** (병기) the bundled corpus expectation. Where the personal baseline and the bundled norm **differ**, show **both** and let the user decide — this is **not** enforcement: do **not** auto-flag a paragraph solely because it deviates from the personal baseline (flag Status against the bundled corpus norm as before).
+   - **If `hedge_by_claim` is absent, own `paragraphs < 100`, or `papers: 0` + a note** (empty/thin own corpus) → use the **bundled statistics only** (table above). Note "personal baseline unavailable (own paragraphs < 100)" in the verdict.
+   - `style-profile` is **local RAG mode only** (`rag.mode: local`).
+
 4. **Flag deviations**:
    - **Critical**: method_description with hedge=moderate or strong → "Did this experiment happen or didn't it?"
    - **Critical**: caveat with hedge=none → "Caveats need hedging by definition"
@@ -85,6 +93,8 @@ When hedges drift outside this distribution, prose feels AI-generated or unconvi
 | 3 | evidence | mild | none/mild | ✅ |
 | 4 | caveat | none | moderate | ❌ under-hedged |
 | 5 | mechanism | mild | mild | ✅ |
+
+> When a **personal hedge baseline** is active (own `paragraphs ≥ 100`), insert a **Personal (own)** column next to **Expected hedge**, sourced from `style-profile.hedge_by_claim`. Determine Status against the **bundled corpus** norm (not the personal baseline), and annotate rows where the two diverge, e.g. "corpus=none / personal=mild — both reported; author tends to hedge this claim type." If the personal baseline is unavailable, omit the column and state "personal baseline unavailable (own paragraphs < 100)".
 
 ### Critical issues
 1. Paragraph 2 (method_description) uses "we may have synthesized X by ..."

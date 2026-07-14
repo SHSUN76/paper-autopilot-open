@@ -20,6 +20,14 @@ Institutional subscriptions can be reached two ways: (1) directly from the user'
 
 **Core rule:** Never tell the user "this is paywalled" without exhausting every configured institutional path.
 
+## Auto-detection (Onboarding)
+
+You normally don't hand-write `institution_proxy_url`. The onboarding wizard (Phase 2.4) registers it **semi-automatically**: it opens your institution's library portal in Playwright, you log in and open any one subscription article, and the wizard captures the resulting URL and extracts the proxy pattern (the part before `url=`/`qurl=`, or an OpenAthens `redirector` form), then validates it against a second subscription URL before writing it to config.
+
+- **Credential-handling is forbidden.** The wizard never asks for, receives, or programmatically enters your library ID / password / OTP. **You log in yourself in the browser**; it only waits for your "done" signal. (Institutional SSO uses device fingerprinting + MFA, so programmatic login fails or locks the account — and credentials must never enter the session transcript.)
+- **Host-rewriting proxies can't be auto-registered.** If your proxy merges the origin domain into the hostname (e.g. `www-nature-com.proxy.univ.ac.kr`), the `{prefix}{URL}` pattern can't express it and Tier 2 can't auto-convert it. In that case leave `institution_proxy_url` unset and rely on Tier 1 (IP-based) access.
+- If Playwright MCP is unavailable during onboarding, you enter the pattern manually from the three example forms (EZproxy / OpenAthens / redirector).
+
 ## Why the Order Matters
 
 The tool you choose determines *which IP* the request originates from, which determines *which subscription* the publisher sees:

@@ -22,6 +22,7 @@ Your output is a draft the user will then edit. Your job is to give them a corpu
 5. **Section-appropriate logic** (Rules A1-A8): right claim distribution, right move sequences, right closing moves, right hedge level, right citation density.
 6. **Figure-driven default in Mode E**: when figure_analyses are supplied, they are the **primary content source** — Results sub-sections are organized around figure groups, not arbitrary topics. Body content is anchored to `key_message_draft` and `auto_description.detailed` from Phase 1A.
 7. **Output to file**: write a markdown file the user can review and merge.
+8. **Style conditioning + group routing (RAG)**: begin with `style-profile` (Step 0) to condition the draft on the user's own voice / hedge / paragraph-length / vocabulary tendencies; route **phrasing** exemplars via `--group own` and **content / convention / comparison** exemplars via `--group field`. When the `own` corpus is empty, fall back to bundled statistics + full-corpus retrieval. Record both style-profile usage and per-group search counts in `corpus_grounding`.
 
 ## Input you receive
 
@@ -41,6 +42,24 @@ If the user is using the **/paper-style input pipeline**, expect:
 - `input/figures/*.md`
 
 ## Workflow
+
+### Step 0 — Establish user style profile (style conditioning)
+
+Before anything else, fetch the user's own writing-style profile (built from the `own` corpus group — the user's own published papers):
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" style-profile
+```
+Returns JSON: `{papers, paragraphs, voice{active,passive,mixed %}, has_active_we_rate, hedge_by_claim{claim→{none,mild,moderate,strong %}}, claim_distribution, move_transitions{from→{to:%}}, avg_paragraph_words, top_vocabulary[{phrase,category,count}]}`.
+
+- **If `papers ≥ 3`** → establish the **user style conditions** and draft to match them:
+  - **Voice**: follow the user's `voice` active/passive ratio and `has_active_we_rate` (e.g., high active-we → prefer active "we" where the section permits).
+  - **Hedge**: per claim_type, bias toward the user's `hedge_by_claim` distribution, not only the bundled corpus norm.
+  - **Paragraph length**: aim near `avg_paragraph_words`.
+  - **Preferred phrasing / transitions**: reuse `top_vocabulary` phrases and `move_transitions` where natural.
+  - **Conflict rule**: when a user-style tendency conflicts with the target journal's convention (e.g., journal mandates passive Methods but the user writes active), **the journal convention wins**; note the override in the audit trail.
+- **If `papers < 3`, or the profile returns `papers: 0` + a note** (empty `own` corpus) → **skip style conditioning** and fall back to the bundled corpus statistics (`references/corpus-evidence.md`) + full-corpus retrieval (no `--group` filter). Record the fallback in the audit trail.
+
+Note: `style-profile` and the `--group` / `--since` retrieval options (Step 3) are **local RAG mode only** (`rag.mode: local`). Under `supabase` / `disabled`, treat as empty-profile fallback.
 
 ### Step 1 — Read references
 1. `${CLAUDE_PLUGIN_ROOT}/skills/academic-writing/references/academic-writing.md`
@@ -68,33 +87,40 @@ For the target section, fetch 5-7 corpus paragraphs of the dominant claim type f
 **You may not skip this step.** Track every retrieve call in `corpus_grounding.retrieve_calls[]` for the
 final draft metadata.
 
+**Group routing (local RAG mode)** — route each retrieval by what you need from it:
+- **Phrasing / style exemplars** (how the user words a move — contribution nugget, evidence presentation): add `--group own` (k=3-5). If own matches are weak (few results, or the group returns `papers: 0` + a note), re-run **without** `--group` to expand to the full corpus.
+- **Content / convention / comparison-literature exemplars** (motivation framing, field norms, prior-work comparison): add `--group field`. For Introduction / motivation retrievals, also add `--since <year>` using the most recent 5 years (i.e., `field-profile`'s `years.max − 4`) to bias toward current framing.
+- These `--group` / `--since` options are **local RAG mode only**; under supabase/disabled, drop them and use full-corpus retrieval.
+
 ```bash
-# For Introduction first paragraph (motivation)
+# For Introduction first paragraph (motivation) — CONTENT/framing → field, recent 5 yr
 node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --query "<research focus, e.g. 'high-nickel cathode dry electrode crack'>" \
-  --section Introduction --claim motivation --k 7
+  --section Introduction --claim motivation --group field --since <years.max-4> --k 7
 ```
 
 ```bash
-# For Introduction last paragraph (contribution)
+# For Introduction last paragraph (contribution) — PHRASING/nugget voice → own
 node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --query "<research nugget>" \
-  --section Introduction --claim contribution --k 7
+  --section Introduction --claim contribution --group own --k 5
 ```
 
 ```bash
-# For Conclusion contribution paragraph
+# For Conclusion contribution paragraph — PHRASING/voice → own
 node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --query "<contribution claim>" \
-  --section Conclusion --claim contribution --k 7
+  --section Conclusion --claim contribution --group own --k 5
 ```
 
 ```bash
-# For Results evidence paragraphs
+# For Results evidence paragraphs — PHRASING/how results are worded → own
 node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --query "<specific finding>" \
-  --section Results+Discussion --claim evidence --k 5
+  --section Results+Discussion --claim evidence --group own --k 5
 ```
+
+If `--group own` returns `papers: 0` + a note (empty own corpus), drop `--group` and retrieve from the full corpus for that call, and record the fallback in `corpus_grounding`.
 
 Read the `text_excerpt` and `full_text` of each result. **You will not copy these — you will adapt phrasing patterns**.
 
@@ -200,7 +226,11 @@ Format:
 ## Drafting metadata
 - Section: Introduction
 - Generated: <timestamp>
+- Style profile: used (own papers: 8) — voice active 62%, avg_paragraph_words 118, active-we conditioning applied
+  (or: not used — empty own corpus, bundled-stats fallback)
 - Corpus exemplars consulted: 14 (Introduction motivation: 7; contribution: 7)
+- Retrieval by group: own 2 calls (phrasing: contribution, evidence), field 1 call (motivation, --since 2021)
+  (record any `--group own` → full-corpus fallbacks here)
 - WebSearch queries: 8
 - References added: 12 (see references.csv)
 - Rule self-check: A1✅ A2✅ A3✅ A6✅ B1✅ C4✅ C7✅
@@ -272,21 +302,31 @@ For each sub-section, gather the relevant `figure_analyses[].composite.key_messa
 
 #### Step E2 — RAG retrieve per figure group (MANDATORY, multi-call)
 
-For each figure group, run TWO retrieve calls:
+For each figure group, run TWO retrieve calls. Calls A/B are **phrasing** exemplars (how results/mechanism are worded) → `--group own`; when you later frame **literature comparison** inside the Discussion block, retrieve with `--group field` instead. If `--group own` returns `papers: 0` + a note, drop `--group` for that call and log the fallback.
 
 ```bash
-# Call A: corpus paragraphs in same section/claim
+# Call A: corpus paragraphs in same section/claim — PHRASING → own
 node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --query "<key_message_draft>" \
   --section "Results+Discussion" \
   --claim evidence \
+  --group own \
   --k 5
 
-# Call B: mechanism/interpretation paragraphs (if figure has mechanism role)
+# Call B: mechanism/interpretation paragraphs (if figure has mechanism role) — PHRASING → own
 node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --query "<key_message_draft>" \
   --section "Results+Discussion" \
   --claim mechanism \
+  --group own \
+  --k 5
+
+# Call C (optional): literature-comparison framing for the Discussion block — CONTENT → field
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
+  --query "<comparison / prior-work topic>" \
+  --section "Results+Discussion" \
+  --claim interpretation \
+  --group field \
   --k 5
 ```
 

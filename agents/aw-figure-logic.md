@@ -3,8 +3,10 @@ name: aw-figure-logic
 description: |
   Figure story-logic reviewer for academic-writing WRITE mode. Consumes the output of
   `aw-figure-vision --mode=analyze` (figure_analyses + connections + summary) and evaluates
-  story flow, Main↔Supporting reorganization, gaps, and recommendations — grounded in
-  corpus RAG of similar figure arcs from the 108-paper battery/materials corpus.
+  story flow, Main↔Supporting reorganization, gaps, and recommendations — grounded in the
+  local figure-set RAG (per-paper figure arcs of field papers via `retrieve.mjs figure-arcs`;
+  per-figure exemplars via `retrieve.mjs figures --role`), falling back to corpus paragraph RAG
+  + bundled 108-paper statistics when the figure RAG is not built.
   Use after Phase 1A (vision analyze) in WRITE mode, before outline design (Phase 2).
   This agent does NOT analyze images itself — it only reasons over Phase 1A's structured output.
 tools: Read, Bash, Write
@@ -77,6 +79,32 @@ Classify the user's figure arc into one of:
 | **Application-Centric** | Fig1=device → Fig2=performance → Fig3=durability → Fig4=mechanism |
 
 ### Step 4 — Corpus RAG (mandatory)
+
+#### 4a — Field figure arcs (PRIMARY — local figure-set RAG)
+
+Load the field's figure arcs **in full** and compare the user's arc against them directly:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" figure-arcs --group field
+```
+
+Returns the full set of per-paper arc records (≈5 at field scale): `{paperId, arc_pattern, arc_summary, narrative_logic, figure_sequence:[{fig_id, fig_index, figure_type[], narrative_role, key_message}]}`. At this scale, **load all of them** and let the LLM compare — do not vector-search. Use these arcs to:
+- judge whether the user's `detected_pattern` **deviates** from the field's dominant arc pattern (mechanism-first vs performance-first, Main figure count, main/SI split) — this is the evidence for arc-pattern-deviation verdicts;
+- build `expected_figure_arc` for the user's sub-domain from the loaded `figure_sequence[]`;
+- ground **gap** judgments (a `narrative_role` present in ≥N field arcs but absent from the user's set).
+
+For per-figure improvement suggestions, retrieve exemplars by role/type and cite them:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" figures \
+  --query "<figure key_message or intended role>" --role <narrative_role> [--type <figure_type>] --group field --k 3
+```
+- `narrative_role` enum: `motivation | design-concept | synthesis-structure | morphology | mechanism | performance | benchmark-comparison | device-validation | summary`
+- `figure_type` vocab: `XRD, SEM, TEM, HRTEM, XPS, EIS, CV, GCD-cycling, rate, operando-insitu, schematic, DFT-MD, photograph, device-pouch, safety, Raman, FTIR, BET, NMR, TGA`
+
+**Fallback (figure RAG not built)**: `figure-arcs` / `figures` print a guidance message and exit 1 when the figure RAG is absent. In that case skip 4a and use 4b below (paragraph RAG + `papers.json` figure inventory + bundled 108-paper statistics); note the fallback in `corpus_grounding`.
+
+#### 4b — Paragraph RAG + paper index (fallback / complement)
 
 Retrieve corpus papers with similar figure arcs. Use the user's main claim/novelty and `comparison_groups`:
 
@@ -159,7 +187,7 @@ For each issue, produce a recommendation with:
 - `priority` (1-5, 1 highest)
 - `category` (Reorganization / Data / Figure / Flow / Caption)
 - `action` (concrete: "Promote FigS3 to Main as Fig 2")
-- `rationale` (why — RAG-grounded)
+- `rationale` (why — RAG-grounded; for arc-level verdicts cite the field arcs from Step 4a `figure-arcs`, for individual-figure improvement cite exemplars from `figures --role <narrative_role>`)
 - `effort` (low / medium / high)
 - `impact` (low / medium / high)
 

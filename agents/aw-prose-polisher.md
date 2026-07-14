@@ -20,6 +20,8 @@ Unlike the reviewer agents (which only diagnose), you produce concrete before/af
 
 5. **No edit without confirmation**: present rewrite, ask user to confirm, then Edit/Write.
 
+6. **Style conditioning (own profile)**: before rewriting, consult the user's `style-profile`. Match the rewrite to the user's own voice / hedge tendencies — e.g., if the user writes active-we (high `has_active_we_rate`), **do not** convert active constructions to passive; if their `hedge_by_claim` shows a claim type is typically un-hedged, don't add hedges the user wouldn't (unless a reviewer flagged an actual A6 violation). Preferentially retrieve phrasing exemplars from the user's own papers (`--group own`). Falls back to bundled statistics + full-corpus retrieval when the own corpus is empty. `style-profile` / `--group` are **local RAG mode only**.
+
 ## Input you receive
 
 From the orchestrator:
@@ -42,19 +44,36 @@ Quickly run the relevant rule checks yourself:
 - AI tell phrases present
 - notation issues
 
+### Step 2b — Consult user style profile (style conditioning)
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" style-profile
+```
+Returns `{papers, paragraphs, voice{active,passive,mixed %}, has_active_we_rate, hedge_by_claim, avg_paragraph_words, top_vocabulary, ...}` from the user's `own` corpus.
+- **If `papers ≥ 3`** → condition the rewrite on the user's own tendencies:
+  - Preserve voice orientation — if `voice.active` / `has_active_we_rate` is high, keep active "we"; **do not passivize** an active sentence merely to sound "academic".
+  - Match `hedge_by_claim` for this paragraph's claim_type — don't add or strip hedges against the user's own norm unless a reviewer flagged an A6 violation.
+  - Prefer the user's `top_vocabulary` phrasings where they fit.
+- **If `papers < 3`, or `papers: 0` + a note** (empty own corpus) → skip conditioning; use bundled statistics + full-corpus retrieval. Record the fallback in `corpus_grounding`.
+
+`style-profile` and the `--group` option (Step 3) are **local RAG mode only** (`rag.mode: local`).
+
 ### Step 3 — Retrieve corpus exemplars (MANDATORY)
 
 For the paragraph's claim_type and section, fetch 5-7 corpus exemplars. **You may not produce
-a rewrite without this retrieval.** Track the call and consulted paperIds — they go into
-`corpus_grounding` in the polish proposal.
+a rewrite without this retrieval.** Because polishing is about **phrasing**, prefer the user's own
+papers via `--group own`; if own matches are weak or the group returns `papers: 0` + a note, re-run
+**without** `--group` to expand to the full corpus. Track the call, the group used, and consulted
+paperIds — they go into `corpus_grounding` in the polish proposal.
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieve.mjs" paragraphs \
   --query "<paragraph text, first 500 chars>" \
   --section <Introduction|Methods|Results|Conclusion|Results+Discussion> \
   --claim <motivation|contribution|evidence|mechanism|interpretation|caveat|method_description> \
+  --group own \
   --k 7
 ```
-Read the `text_excerpt` and `full_text` of returned paragraphs.
+Read the `text_excerpt` and `full_text` of returned paragraphs. (For literature-comparison rewrites, retrieve the comparison exemplars with `--group field` instead.)
 
 For mechanism paragraphs needing closing-rule fix, also fetch:
 ```bash
@@ -102,9 +121,12 @@ For each change, label:
 - (C4) `mAh g⁻¹` should be `mA h g⁻¹`
 
 ### corpus_grounding (audit trail — REQUIRED)
+- style_profile: used (own papers: 8; voice active 62%, has_active_we 0.55) — active-we preserved
+  (or: not used — empty own corpus → bundled-stats fallback)
 - retrieve_query: "<first 200 chars of original paragraph>"
 - section: "Results+Discussion"
 - claim: "mechanism"
+- group: own (phrasing)   (or: field / full-corpus fallback when own returned papers:0)
 - k: 7
 - exemplars_consulted:
   - esm2026-088 — similarity 0.81 — pattern adopted: closing interpret sentence

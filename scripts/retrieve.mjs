@@ -8,12 +8,16 @@
  *   disabled            — clear message + exit code 2
  *
  * Commands (identical output shape across backends):
- *   node retrieve.mjs paragraphs --query "We propose..." --section Introduction --claim contribution --k 5
+ *   node retrieve.mjs paragraphs --query "We propose..." --section Introduction --claim contribution --k 5 [--since 2020]
  *   node retrieve.mjs next-paragraph --query "Figure 3 shows cycling..." --k 3
  *   node retrieve.mjs vocabulary --category verb --context "DFT cycling" --min-papers 5
  *   node retrieve.mjs aitells --threshold 5
  *   node retrieve.mjs section-distribution --section Introduction
  *   node retrieve.mjs move-transitions --from present_evidence
+ *   node retrieve.mjs style-profile          (local only — dumps style-profile.json)
+ *   node retrieve.mjs field-profile          (local only — dumps field-profile.json)
+ *   node retrieve.mjs figures --query "Nyquist EIS panel" --type electrochemical --role performance --group field --k 5   (local only — figure-set RAG search)
+ *   node retrieve.mjs figure-arcs --group own    (local only — returns ALL figure arcs; not a search)
  *
  * Dev / test bypass for the embedding call (paragraphs, next-paragraph):
  *   --query-vector '[0.1, 0.2, ...]'   supply the query vector directly (skips embed + provider check)
@@ -22,12 +26,17 @@
  * Output: JSON to stdout. Errors to stderr.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { loadConfig, providerApiKey } from "./ingest/config.mjs";
 import { embedOne } from "./ingest/embedding.mjs";
 import {
   normalizeSection,
   cosine,
   loadStore,
+  loadFigures,
+  loadFigureArcs,
+  arr,
 } from "./ingest/store.mjs";
 
 const config = loadConfig();
@@ -51,11 +60,24 @@ const VALID_CMDS = [
   "aitells",
   "section-distribution",
   "move-transitions",
+  "style-profile",
+  "field-profile",
+  "figures",
+  "figure-arcs",
 ];
+
+// style-profile / field-profile are local-only artifacts (no supabase analogue).
+const LOCAL_ONLY_CMDS = new Set(["style-profile", "field-profile"]);
+// figures / figure-arcs (figure-set RAG) are local-only too — no supabase schema.
+const FIGURE_CMDS = new Set(["figures", "figure-arcs"]);
 
 function usageExit() {
   console.error(
-    "Usage: node retrieve.mjs <" + VALID_CMDS.join("|") + "> [opts]"
+    "Usage: node retrieve.mjs <" + VALID_CMDS.join("|") + "> [opts]\n" +
+      "  paragraphs   --query <t> [--section S] [--claim C] [--group own|field|review] [--since <year>] [--k N]\n" +
+      "  figures      --query <t> [--type X] [--role Y] [--group own|field|review] [--k N]\n" +
+      "  figure-arcs  [--group own|field|review]   (returns all arcs; not a search)\n" +
+      "  style-profile | field-profile | figures | figure-arcs   (local mode only; run build-corpus.mjs first)"
   );
   process.exit(1);
 }
@@ -86,13 +108,27 @@ async function embedQuery(text, corpusMeta) {
   }
   const dims = (corpusMeta && corpusMeta.embedding && corpusMeta.embedding.dimensions) || config.embedding.dimensions;
   const apiKey = providerApiKey(config, provider);
-  return embedOne(text, { provider, dimensions: dims, apiKey });
+  // gemini taskType compat: only send RETRIEVAL_QUERY when the corpus was built
+  // WITH a task_type recorded in meta. Corpora built before task_type existed
+  // (meta.embedding.task_type absent/null) are queried WITHOUT taskType so the
+  // query embedding stays consistent with how those documents were embedded.
+  const taskType =
+    corpusMeta && corpusMeta.embedding && corpusMeta.embedding.task_type
+      ? "RETRIEVAL_QUERY"
+      : undefined;
+  return embedOne(text, { provider, dimensions: dims, apiKey, taskType });
 }
 
 // ===========================================================================
 // LOCAL BACKEND
 // ===========================================================================
 async function runLocal() {
+  // Profile commands read a prebuilt JSON artifact directly (no store load, no
+  // embedding) so they give a precise "build first" message when absent.
+  if (LOCAL_ONLY_CMDS.has(cmd)) return localProfile(cmd);
+  // figure-arcs returns ALL arcs verbatim (not a search) — no store / no embed.
+  if (cmd === "figure-arcs") return localFigureArcs();
+
   const store = loadStore(config.rag.local_corpus_dir);
   const meta = store.meta;
 
@@ -109,7 +145,88 @@ async function runLocal() {
       return localSectionDistribution(store);
     case "move-transitions":
       return localMoveTransitions(store);
+    case "figures":
+      return localFigures(meta);
   }
+}
+
+// figure-set RAG "not built yet" guard (figures.jsonl / figure-arcs.json absent).
+function figureCorpusMissing() {
+  console.error("figure corpus 없음 — vision figure 분석 후 build-corpus 재실행");
+  process.exit(1);
+}
+
+function figureGroupOpt() {
+  if (opts.group && !["own", "field", "review"].includes(opts.group)) {
+    throw new Error("--group must be 'own', 'field', or 'review'");
+  }
+  return opts.group || null;
+}
+
+// figures: pre-filter (type substring / role exact / group) then cosine top-k.
+async function localFigures(meta) {
+  const figures = loadFigures(config.rag.local_corpus_dir);
+  if (!figures.length) figureCorpusMissing();
+  if (!opts.query) throw new Error("--query required");
+  const k = parseInt(opts.k || "5", 10);
+  const group = figureGroupOpt();
+  const vec = await embedQuery(opts.query, meta);
+
+  let rows = figures.slice();
+  if (opts.type) {
+    const t = String(opts.type).toLowerCase();
+    rows = rows.filter((f) => arr(f.figureType).some((x) => String(x).toLowerCase().includes(t)));
+  }
+  if (opts.role) rows = rows.filter((f) => f.narrativeRole === opts.role);
+  if (group) rows = rows.filter((f) => f.paperGroup === group);
+
+  const scored = rows.map((f) => ({ f, similarity: cosine(vec, f.embedding || []) }));
+  scored.sort((a, b) => b.similarity - a.similarity);
+  return scored.slice(0, k).map(({ f, similarity }) => ({
+    paperId: f.paperId,
+    fig_id: f.figId,
+    figure_type: f.figureType,
+    narrative_role: f.narrativeRole ?? null,
+    panel_count: f.panelCount ?? null,
+    panel_grid: f.panelGrid ?? null,
+    caption: f.caption ?? null,
+    key_message: f.keyMessage ?? null,
+    narrative_context: f.narrativeContext ?? null,
+    similarity,
+  }));
+}
+
+// figure-arcs: return ALL arcs (optionally group-filtered). Not a search.
+function localFigureArcs() {
+  const arcs = loadFigureArcs(config.rag.local_corpus_dir);
+  if (!arcs.length) figureCorpusMissing();
+  const group = figureGroupOpt();
+  const rows = group ? arcs.filter((a) => a.group === group) : arcs;
+  return rows.map((a) => ({
+    paperId: a.paperId,
+    group: a.group,
+    arc_pattern: a.arcPattern ?? null,
+    arc_summary: a.arcSummary ?? null,
+    narrative_logic: a.narrativeLogic ?? null,
+    figure_sequence: arr(a.figureSequence).map((f) => ({
+      fig_id: f.figId,
+      fig_index: f.figIndex ?? null,
+      figure_type: f.figureType,
+      narrative_role: f.narrativeRole ?? null,
+      key_message: f.keyMessage ?? null,
+    })),
+  }));
+}
+
+// Dump a prebuilt profile artifact (style-profile.json / field-profile.json).
+function localProfile(which) {
+  const fname = which === "style-profile" ? "style-profile.json" : "field-profile.json";
+  const fpath = path.join(config.rag.local_corpus_dir, fname);
+  if (!fs.existsSync(fpath)) {
+    console.error("corpus를 먼저 빌드하세요 (build-corpus.mjs)");
+    process.exit(1);
+  }
+  return JSON.parse(fs.readFileSync(fpath, "utf8"));
 }
 
 async function localParagraphs(store, meta) {
@@ -125,12 +242,37 @@ async function localParagraphs(store, meta) {
   if (opts.section) rows = rows.filter((r) => r.section === opts.section);
   if (opts.claim) rows = rows.filter((r) => r.p.primaryClaimType === opts.claim);
   if (opts.group) {
-    if (opts.group !== "own" && opts.group !== "field") {
-      throw new Error("--group must be 'own' or 'field'");
+    if (!["own", "field", "review"].includes(opts.group)) {
+      throw new Error("--group must be 'own', 'field', or 'review'");
     }
     // paperGroup lives on papers.json, not per-paragraph — map paperId -> group.
     const groupByPaper = new Map(store.papers.map((p) => [p.paperId, p.paperGroup]));
     rows = rows.filter((r) => groupByPaper.get(r.p.paperId) === opts.group);
+  }
+  // --since <year>: keep papers with year >= since. Papers with an unknown year
+  // (year == null) are excluded; the drop count is noted to stderr (1 line).
+  if (opts.since != null && opts.since !== true) {
+    const since = parseInt(opts.since, 10);
+    if (Number.isFinite(since)) {
+      const yearByPaper = new Map(store.papers.map((p) => [p.paperId, p.year ?? null]));
+      let droppedNullYear = 0;
+      const droppedPapers = new Set();
+      rows = rows.filter((r) => {
+        const y = yearByPaper.get(r.p.paperId);
+        if (y == null) {
+          droppedNullYear += 1;
+          droppedPapers.add(r.p.paperId);
+          return false;
+        }
+        return y >= since;
+      });
+      if (droppedNullYear > 0) {
+        process.stderr.write(
+          `--since ${since}: excluded ${droppedNullYear} paragraph(s) from ` +
+            `${droppedPapers.size} paper(s) with unknown year\n`
+        );
+      }
+    }
   }
   rows.sort((a, b) => b.similarity - a.similarity);
   rows = rows.slice(0, k);
@@ -338,6 +480,15 @@ async function loadSupabaseMeta(client) {
 }
 
 async function runSupabase() {
+  // Profiles and figure-set RAG are local-only features — no supabase analogue.
+  if (LOCAL_ONLY_CMDS.has(cmd) || FIGURE_CMDS.has(cmd)) {
+    console.error(
+      `${cmd} is a local-only feature (rag.mode='local'). ` +
+        "It has no supabase backend — build a local corpus and query it there."
+    );
+    process.exit(1);
+  }
+
   const sb = config.rag.supabase || {};
   const connectionString =
     sb.direct_url || sb.database_url || process.env.DIRECT_URL || process.env.DATABASE_URL;
@@ -348,11 +499,13 @@ async function runSupabase() {
     process.exit(1);
   }
 
-  // The supabase schema fixes the embedding column to vector(1024).
-  if (config.embedding.dimensions !== 1024) {
+  // The supabase schema fixes the embedding column to vector(3072). This is the
+  // schema-default guard; the per-query corpus/config cross-check (via the
+  // CorpusMeta row loaded in loadSupabaseMeta) still enforces the actual dims.
+  if (config.embedding.dimensions !== 3072) {
     console.error(
-      `ERROR: supabase backend is fixed to vector(1024) but config.embedding.dimensions=${config.embedding.dimensions}. ` +
-        "Set embedding.dimensions to 1024, or use rag.mode='local'."
+      `ERROR: supabase backend is fixed to vector(3072) but config.embedding.dimensions=${config.embedding.dimensions}. ` +
+        "Set embedding.dimensions to 3072, or use rag.mode='local'."
     );
     process.exit(1);
   }
@@ -361,6 +514,12 @@ async function runSupabase() {
   if (opts.group) {
     console.error(
       "WARN: --group is ignored in supabase mode (paperGroup is not stored in the supabase schema)."
+    );
+  }
+  // paper year is not stored in the supabase schema — --since cannot filter here.
+  if (opts.since) {
+    console.error(
+      "WARN: --since is ignored in supabase mode (paper year is not stored in the supabase schema)."
     );
   }
 

@@ -9,9 +9,13 @@ A battery / materials-science paper-writing **feedback-loop orchestrator** for C
 - **Figure-first pipeline** — the paper is designed around its figures. A figure set becomes a mockup, the mockup drives the manuscript, and new measurements re-evolve both.
 - **G1–G6 decision gates** — the orchestrator pauses at named gates (post-scaffold, post-mockup, post-plan, post-simulation, post-evolve, pre-submit). You choose per-gate `ask` / `auto` / `mixed` routing in plain language.
 - **Adversarial spec review (alpha)** — `pa-forcing-questions` pushes vague concepts until they are specific; `pa-spec-review-loop` scores figure sets / SOPs / drafts across dimensions and loops fixes. (Alpha: skill logic + mock dogfood verified; live reviewer-dispatch verification is still deferred.)
-- **Dual RAG with a self-built corpus** — you build the retrieval corpus from your *own* papers. Backend is `local` (on-disk vector store, no external DB) by default, `supabase` (bring-your-own project) optional, or `disabled`.
+- **Dual RAG with a self-built corpus** — you build the retrieval corpus from your *own* papers, plus field papers and an optional **review-paper group** (≤5, for fast domain grounding — tagged/embedded for knowledge retrieval only, excluded from the style profile and figure vision). The build emits two profiles automatically: an **own writing-style profile** (voice / hedge / phrasing exemplars) and a **field-knowledge profile** (year range, top journals, recent trends via a `--since` filter). Backend is `local` (on-disk vector store, no external DB) by default, `supabase` (bring-your-own project) optional, or `disabled`.
+- **Vision-based paper + figure analysis** — for each own/field paper, a Claude Code sub-agent reads the PDF as page vision (subscription credits, $0 API cost) and extracts a structured figure report: per-panel content, each figure's proven message, its narrative role, and how the figures chain into the paper's story arc.
+- **Figure-set RAG** — those figure reports build a searchable figure index (`figures.jsonl`) and an arc library (`figure-arcs.json`), so the writer can retrieve exemplar figure arcs from your field via `retrieve.mjs figures` / `figure-arcs` when designing a new paper's figure set.
+- **Corpus relationship report** — the onboarding build renders a single self-contained `corpus-report.html` visualizing own↔field relationships and section / claim / move distributions.
 - **Bundled toolchain** — `ppt-image` (Gemini figure mockups), `docx` (pandoc export), `parse` (PDF parsing, optional STORM), `review-paper` (6-agent referee report), `submission-prep` (cover letter + submission checklist). No external plugin required.
-- **Onboarding wizard** — `/paper-autopilot-open:onboard` sets up dependencies, config, and corpus interactively, so you never hand-edit a JSON file to get started.
+- **Materials Project integration** — real crystal-structure + materials-property data grounding via the `materials-project` skill (optional `materials_project` API key).
+- **Hands-off onboarding wizard** — `/paper-autopilot-open:onboard` installs Node + Python dependencies, writes config, auto-creates the corpus folders, semi-automatically registers your institution library proxy (you log in in the browser; credentials never touch the session), and builds the corpus + profiles + report. Your only manual step is dropping ~5 own + ~5 field PDFs (plus an optional ≤5 review PDFs) into a folder — you never hand-edit a JSON file.
 - **Version management** — every output lands in a `[YYMMDD_content]` versioned folder; old versions are never overwritten.
 
 ## Pipeline
@@ -64,8 +68,10 @@ The onboarding wizard handles pre-check, dependency install, the config file, co
 | Anthropic API key | Optional | API-path corpus mining (default path is subagent = free) |
 | STORM API key | Optional | High-quality PDF parsing (`parse`) |
 | Tavily API key | Optional | Web reference search (`ppt-image --ref`) |
+| Materials Project API key | Optional | Crystal-structure / materials-property data (`materials-project` skill) |
 | pandoc | Optional | Markdown → docx (`docx`) |
-| Playwright MCP | Optional | Institutional subscription access (`paper-access`) |
+| Python 3.10+ | Optional | PDF parsing / figure extraction / docx (`pip install -r scripts/requirements.txt`: PyMuPDF, Pillow, python-docx, requests) |
+| Playwright MCP | Optional | Institutional subscription access + semi-auto proxy registration (`paper-access`) |
 | Supabase project | Optional | `rag.mode=supabase` cloud vector store |
 
 ## RAG architecture (two layers)
@@ -73,9 +79,9 @@ The onboarding wizard handles pre-check, dependency install, the config file, co
 The retrieval system pairs a **fixed statistical prior** with **your own exemplars**:
 
 1. **Bundled aggregate statistics (108 papers).** `skills/academic-writing/references/corpus-evidence.md` holds quantitative distributions (claim types, hedge levels, rhetorical-move transitions, AI-tell thresholds) mined from a 108-paper battery/materials survey. This is *statistics only* — no source text — and it grounds the review rules.
-2. **User-built local corpus.** You tag your own ~5 papers + ~5 field papers into paragraph reports and embed them into an on-disk vector store (`~/.claude/paper-autopilot-open/corpus`). This layer powers exemplar retrieval and voice grounding via `retrieve.mjs`.
+2. **User-built local corpus.** You tag your own ~5 papers + ~5 field papers (plus an optional ≤5 review papers) into paragraph reports and embed them into an on-disk vector store (`~/.claude/paper-autopilot-open/corpus`). This layer powers exemplar retrieval and voice grounding via `retrieve.mjs`. The build also emits two profiles — `style-profile.json` (your **own** writing voice / hedge / phrasing) and `field-profile.json` (**field** year range, top journals) — queryable via `retrieve.mjs style-profile` / `field-profile`, with `paragraphs --since <year>` to pull only recent field work. On top of the paragraph layer, own/field papers get a **vision figure pass**: a per-paper figure report (panels, per-figure key message, narrative role, story arc) that builds a searchable `figures.jsonl` + `figure-arcs.json`, queryable via `retrieve.mjs figures` / `figure-arcs`. A `corpus-report.html` visualizes the own↔field relationship map. (The **review** group is paragraph-tagged for knowledge retrieval only — excluded from the style profile and the figure pass.)
 
-The prior says *what is normal*; your corpus says *how your field actually writes*. Once your corpus passes ~30 papers, recalibrating the statistics on it is recommended. **Supabase** is an optional swap for the local store (`rag.mode=supabase` + `scripts/setup/corpus-schema.sql` + `ingest-supabase.mjs`); `disabled` turns RAG off for a reduced-quality offline mode.
+The prior says *what is normal*; your **own** corpus says *how you write* and your **field** corpus says *how your field actually writes*. Once your corpus passes ~30 papers, recalibrating the statistics on it is recommended. **Supabase** is an optional swap for the local store (`rag.mode=supabase` + `scripts/setup/corpus-schema.sql` + `ingest-supabase.mjs`); `disabled` turns RAG off for a reduced-quality offline mode.
 
 ## Cost transparency
 

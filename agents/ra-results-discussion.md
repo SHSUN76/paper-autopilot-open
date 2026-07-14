@@ -27,20 +27,30 @@ Read `<plugin>/references/style-guide.md`.
 - (if exists) `<paper>/output/aw-sessions/<id>/figure_analyses/*.yaml` (vision-analyzed figures)
 - (if exists) `<paper>/output/aw-sessions/<id>/connections.json` (figure-to-figure relations)
 
+### Step 2b: Field knowledge framing (field-profile) — MANDATORY
+
+```bash
+node <plugin>/scripts/retrieve.mjs field-profile
+```
+Returns `{papers, paragraphs, years{min,max,histogram}, journals[{name,count}], claim_by_section, top_method_vocabulary, top_vocabulary}` from the **field** (domain) corpus group. Use it to frame interpretation and literature comparison against the field's current state (dominant journals, field-current method vocabulary, recency window). If `papers: 0` + a note (empty field corpus) → skip framing, use bundled statistics, retrieve without `--group`.
+
+`field-profile` and the `--group` option are **local RAG mode only** (`rag.mode: local`).
+
 ### Step 3: RAG retrieval per figure group (MANDATORY)
 
-For each Main figure group (typically 4):
+Route by purpose — **phrasing** (how results are worded) → `--group own`; **literature comparison / interpretation content** → `--group field`. For each Main figure group (typically 4):
 ```bash
-# 1. Similar Results paragraphs
+# 1. Similar Results paragraphs — PHRASING → own
 node <plugin>/scripts/retrieve.mjs paragraphs \
-  --query "<figure key message>" --section Results --k 5
+  --query "<figure key message>" --section Results --group own --k 5
 
-# 2. Discussion interpretation patterns
+# 2. Discussion interpretation / literature comparison — CONTENT → field
 node <plugin>/scripts/retrieve.mjs paragraphs \
-  --query "<figure key message>" --section Discussion --k 5
+  --query "<figure key message>" --section Discussion --group field --k 5
 ```
+If `--group own` returns `papers: 0` + a note, drop `--group` for that call and use full-corpus retrieval; record the fallback in `corpus_grounding`.
 
-Plus bridge retrieval between sub-sections:
+Plus bridge retrieval between sub-sections (transition phrasing; `next-paragraph` takes no `--group`):
 ```bash
 node <plugin>/scripts/retrieve.mjs next-paragraph \
   --query "<previous sub-section closing>" --k 3
@@ -95,6 +105,7 @@ For each figure:
 ## Constraints
 
 - **MANDATORY ~12 retrieve calls** — audit trail required
+- **MANDATORY field-profile framing before writing** — record dominant journals, field method vocabulary, `--group` used per call (own=phrasing, field=comparison/interpretation), and any empty-corpus (`papers: 0`) fallback in `corpus_grounding`
 - **Figure references match figure_set.md exactly** — no off-by-one
 - **Quantitative wherever possible** — vague phrases avoided
 - **Mechanism claims hedged** — over-claim flagged by aw-hedge-coach

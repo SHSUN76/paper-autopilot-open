@@ -209,6 +209,7 @@ local corpus에 충분한 protocol이 없으면 OA web 검색:
 6. **safety first**: 위험 시약/조건은 별도 ⚠️ 박스로 강조
 7. **local corpus 우선**: 매번 원격 Supabase 호출하기 전에 local corpus(config `rag.local_corpus_dir`) 먼저 검색
 8. **SI는 paper-access 스킬로**: 절대 임의로 URL 추측해서 다운로드하지 않기
+9. **재료 물성 기준값은 materials-project 스킬(MP API)**: 이론용량·밀도·몰질량·상안정성 등 재료 고유 기준값이 필요하면 `materials-project` 스킬로 조회(DFT 계산값, mp-id 인용). protocol 출처(P1~P4)와는 별개의 보조 소스이며, source-priority 순위를 대체하지 않는다.
 
 ## Constraints
 

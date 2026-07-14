@@ -8,17 +8,18 @@
   "auto_gates_default": "ask",
   "_auto_gates_comment": "ask | auto | mixed (e.g., 'auto-G1-G3-ask-rest')",
   "api_keys": {
-    "_comment": "gemini: figure image generation + default embeddings (required). openai: alternative embedding provider. anthropic: only for API-path corpus mining. storm_parse: PDF parsing backend (optional). tavily: ppt-image --ref web search (optional). storm_parse_language: optional output language for STORM parsing (auto | ko | en) — storm_parse.py reads api_keys.storm_parse_language, defaults to 'auto' when absent.",
+    "_comment": "gemini: figure image generation + default embeddings (required). openai: alternative embedding provider. anthropic: only for API-path corpus mining. storm_parse: PDF parsing backend (optional). tavily: ppt-image --ref web search (optional). materials_project: 결정구조·재료 물성 조회 (materials-project 스킬, https://next-gen.materialsproject.org/api 에서 무료 발급). storm_parse_language: optional output language for STORM parsing (auto | ko | en) — storm_parse.py reads api_keys.storm_parse_language, defaults to 'auto' when absent.",
     "gemini": "",
     "openai": "",
     "anthropic": "",
     "storm_parse": "",
-    "tavily": ""
+    "tavily": "",
+    "materials_project": ""
   },
   "embedding": {
     "provider": "gemini",
-    "_provider_comment": "gemini (gemini-embedding-001) | openai (text-embedding-3-large). Must match the provider used when the corpus was built. supabase mode fixes the column type to vector(1024) — dimensions MUST stay 1024.",
-    "dimensions": 1024
+    "_provider_comment": "gemini (gemini-embedding-001) | openai (text-embedding-3-large). Must match the provider used when the corpus was built. Default 3072 (native full dimension for both providers). supabase mode uses vector(3072) — dimensions MUST stay 3072 there (3072 exceeds pgvector HNSW index limit, so the schema ships index-free; fine for small corpora).",
+    "dimensions": 3072
   },
   "rag": {
     "mode": "local",
