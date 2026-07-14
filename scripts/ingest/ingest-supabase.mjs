@@ -75,13 +75,13 @@ async function main() {
   // supabase schema, so it is accepted for CLI parity with the local builder
   // but ignored (with a note). Absence is fine.
   let group = null;
-  if (opts.group === "own" || opts.group === "field") {
+  if (opts.group === "own" || opts.group === "field" || opts.group === "review") {
     group = opts.group;
     process.stderr.write(
       `note: --group '${group}' is ignored in supabase mode (paperGroup is not stored in the schema)\n`
     );
   } else if (opts.group) {
-    die("--group must be 'own' or 'field' when provided");
+    die("--group must be 'own', 'field', or 'review' when provided");
   }
   const force = !!opts.force;
 
@@ -115,6 +115,10 @@ async function main() {
 
     // ---- CorpusMeta guard: enforce a single embedding provider/dimensions ----
     // Refuse to mix embeddings from different providers/dims in one corpus.
+    // Dimension policy: CorpusMeta is authoritative (no fixed-3072 assumption).
+    // A NEW corpus starts with config dims (the upsert below records them); an
+    // EXISTING corpus dies on config/meta mismatch — 1024-era corpora keep
+    // working as long as config matches what they were created with.
     try {
       const metaRes = await client.query(
         `SELECT provider, dimensions FROM "CorpusMeta" WHERE id = 1`
@@ -351,6 +355,14 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error("ERROR: " + (e && e.message ? e.message : String(e)));
+  let msg = e && e.message ? e.message : String(e);
+  // pgvector dimension mismatch (legacy schema without CorpusMeta) — add
+  // actionable config guidance, mirroring retrieve.mjs.
+  if (/different vector dimensions|expected \d+ dimensions/i.test(msg)) {
+    msg +=
+      "\n  → config의 embedding.dimensions를 corpus(스키마) 생성 당시 값으로 맞추세요 " +
+      "(차원 변경은 corpus 전체 재적재가 필요합니다).";
+  }
+  console.error("ERROR: " + msg);
   process.exit(1);
 });

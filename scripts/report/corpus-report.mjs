@@ -31,6 +31,7 @@ import {
   cosine,
   loadFigures,
   loadFigureArcs,
+  normGroup,
 } from "../ingest/store.mjs";
 import { computeStyleProfile, computeFieldProfile } from "../ingest/profiles.mjs";
 
@@ -51,6 +52,12 @@ const opts = parseArgs(process.argv.slice(2));
 // ---- constants -------------------------------------------------------------
 const COLOR_OWN = "#e8833a";
 const COLOR_FIELD = "#4a7fb5";
+const COLOR_REVIEW = "#5aa469";
+const GROUP_COLOR = { own: COLOR_OWN, field: COLOR_FIELD, review: COLOR_REVIEW };
+// PCA input caps — power-iteration PCA over the full corpus (10k paragraphs x
+// 3072 dims) would cost billions of float ops per report. Downsample first.
+const PCA_MAX_N = 2000; // max paragraphs fed into PCA (deterministic uniform stride)
+const PCA_MAX_D = 256; // max vector coords fed into PCA (deterministic mulberry32 pick)
 const NET_W = 820;
 const NET_H = 560;
 const MAP_W = 820;
@@ -225,6 +232,21 @@ function pca2(vectors, iterations = 60) {
   });
 }
 
+// Deterministic random-coordinate reduction before PCA. For a visualization-
+// grade 2D scatter, projecting onto a random coordinate subset (a sampling
+// projection) preserves cluster structure well enough at a fraction of the
+// cost; mulberry32 keeps the chosen coordinates reproducible across runs.
+function reduceDims(vectors, maxD) {
+  if (!vectors.length) return vectors;
+  const d = vectors[0].length;
+  if (d <= maxD) return vectors;
+  const rnd = mulberry32(0x85ebca6b);
+  const chosen = new Set();
+  while (chosen.size < maxD) chosen.add(Math.floor(rnd() * d));
+  const idx = [...chosen].sort((a, b) => a - b);
+  return vectors.map((v) => idx.map((i) => v[i]));
+}
+
 // Scale raw coords into a [pad, size-pad] box.
 function scaleCoords(coords, w, h, pad) {
   if (!coords.length) return coords;
@@ -331,7 +353,7 @@ function main() {
     const embs = paras.map((p) => p.embedding).filter((e) => Array.isArray(e) && e.length);
     return {
       id: paper.paperId,
-      group: paper.paperGroup === "field" ? "field" : "own",
+      group: normGroup(paper.paperGroup),
       title: paper.title || null,
       year: paper.year ?? null,
       journal: paper.journal || null,
@@ -356,7 +378,21 @@ function main() {
   const networkSvg = renderNetwork(nodes, edges, pos, threshold);
 
   // ---- paragraph 2D map ----------------------------------------------------
-  const mapParas = store.paragraphs.filter((p) => Array.isArray(p.embedding) && p.embedding.length);
+  // PCA downsampling: cap the sample at PCA_MAX_N paragraphs via a
+  // deterministic uniform stride (index = floor(i*N/MAX)); the scatter renders
+  // the sample. Dimension reduction (PCA_MAX_D) happens in renderParagraphMap.
+  const allMapParas = store.paragraphs.filter((p) => Array.isArray(p.embedding) && p.embedding.length);
+  let mapParas = allMapParas;
+  if (allMapParas.length > PCA_MAX_N) {
+    mapParas = [];
+    for (let i = 0; i < PCA_MAX_N; i++) {
+      mapParas.push(allMapParas[Math.floor((i * allMapParas.length) / PCA_MAX_N)]);
+    }
+  }
+  const pcaNote =
+    mapParas.length < allMapParas.length
+      ? `PCA 표본: n=${mapParas.length} / 전체 N=${allMapParas.length} (결정적 균등 샘플)`
+      : null;
   const mapSvg = renderParagraphMap(mapParas, store);
 
   // ---- statistics ----------------------------------------------------------
@@ -385,6 +421,7 @@ function main() {
     figuresHtml,
     edgeCount: edges.length,
     mapCount: mapParas.length,
+    pcaNote,
     figureCount: figures.length,
   });
 
@@ -422,7 +459,7 @@ function renderNetwork(nodes, edges, pos, threshold) {
   let nodeSvg = "";
   nodes.forEach((n, i) => {
     const r = Math.max(6, Math.min(26, 5 + Math.sqrt(n.paraCount) * 2.4));
-    const fill = n.group === "own" ? COLOR_OWN : COLOR_FIELD;
+    const fill = GROUP_COLOR[n.group] || COLOR_OWN;
     const label = n.title ? n.title.slice(0, 30) : n.id;
     const tip = `${n.id}${n.title ? " — " + n.title : ""} (${n.group}, ${n.paraCount} paras${n.year ? ", " + n.year : ""})`;
     nodeSvg +=
@@ -441,8 +478,8 @@ function renderParagraphMap(mapParas, store) {
   if (mapParas.length === 0) {
     return `<p class="empty">임베딩된 문단이 없어 지도를 그릴 수 없습니다.</p>`;
   }
-  const groupByPaper = new Map(store.papers.map((p) => [p.paperId, p.paperGroup === "field" ? "field" : "own"]));
-  const raw = pca2(mapParas.map((p) => p.embedding));
+  const groupByPaper = new Map(store.papers.map((p) => [p.paperId, normGroup(p.paperGroup)]));
+  const raw = pca2(reduceDims(mapParas.map((p) => p.embedding), PCA_MAX_D));
   const scaled = scaleCoords(raw, MAP_W, MAP_H, 30);
   let pts = "";
   const usedSections = new Set();
@@ -451,7 +488,7 @@ function renderParagraphMap(mapParas, store) {
     usedSections.add(sec);
     const shape = SECTION_SHAPE[sec] || "circle";
     const grp = groupByPaper.get(p.paperId) || "own";
-    const fill = grp === "own" ? COLOR_OWN : COLOR_FIELD;
+    const fill = GROUP_COLOR[grp] || COLOR_OWN;
     const tip = `${p.paperId} · ${sec}${p.primaryClaimType ? " · " + p.primaryClaimType : ""}`;
     pts += `<g><title>${esc(tip)}</title>${marker(shape, scaled[i].x, scaled[i].y, 4.5, fill)}</g>`;
   });
@@ -470,7 +507,8 @@ function sectionLegend(usedSections) {
   });
   const groupItems =
     `<span class="legend-item"><span class="swatch" style="background:${COLOR_OWN}"></span>own (본인)</span>` +
-    `<span class="legend-item"><span class="swatch" style="background:${COLOR_FIELD}"></span>field (분야)</span>`;
+    `<span class="legend-item"><span class="swatch" style="background:${COLOR_FIELD}"></span>field (분야)</span>` +
+    `<span class="legend-item"><span class="swatch" style="background:${COLOR_REVIEW}"></span>review (리뷰)</span>`;
   return `<div class="legend"><strong>그룹</strong> ${groupItems} &nbsp;&nbsp; <strong>섹션</strong> ${items.join(" ")}</div>`;
 }
 
@@ -541,6 +579,7 @@ function renderStats(store, styleProfile, fieldProfile) {
     `<table class="kv">` +
     `<tr><th>own 논문</th><td>${g.own || 0}</td></tr>` +
     `<tr><th>field 논문</th><td>${g.field || 0}</td></tr>` +
+    `<tr><th>review 논문</th><td>${g.review || 0}</td></tr>` +
     `<tr><th>총 문단</th><td>${c.paragraphs || 0}</td></tr>` +
     `<tr><th>총 moves</th><td>${c.moves || 0}</td></tr>` +
     `<tr><th>vocabulary</th><td>${c.vocabulary || 0}</td></tr>` +
@@ -615,7 +654,7 @@ function renderFigures(figures, figureArcs) {
 function renderPage(ctx) {
   const {
     dir, nowIso, kst, provider, counts, groups, threshold,
-    networkSvg, mapSvg, statsHtml, figuresHtml, edgeCount, mapCount, figureCount,
+    networkSvg, mapSvg, statsHtml, figuresHtml, edgeCount, mapCount, pcaNote, figureCount,
   } = ctx;
   const css = `
 :root{--fg:#23272e;--muted:#6b7280;--line:#e4e7eb;--bg:#f7f8fa;--card:#fff;}
@@ -673,10 +712,10 @@ document.querySelectorAll('.graph g > *').forEach(function(el){
     `corpus: <b>${esc(dir)}</b>` +
     `</div></header><main>` +
     `<section><h2>1. 논문 유사도 네트워크</h2>` +
-    `<p class="hint">노드 = 논문(색: own=주황 / field=파랑, 크기 ∝ 문단수), 엣지 = 논문 평균 임베딩 cosine ≥ ${threshold} (두께 ∝ 유사도). 엣지 ${edgeCount}개.</p>` +
+    `<p class="hint">노드 = 논문(색: own=주황 / field=파랑 / review=초록, 크기 ∝ 문단수), 엣지 = 논문 평균 임베딩 cosine ≥ ${threshold} (두께 ∝ 유사도). 엣지 ${edgeCount}개.</p>` +
     `<div class="scroll">${networkSvg}</div></section>` +
     `<section><h2>2. 문단 2D 지도 (PCA)</h2>` +
-    `<p class="hint">전체 문단 임베딩을 2-성분 PCA(power iteration)로 투영. 색 = 그룹, 모양 = 섹션. 문단 ${mapCount}개.</p>` +
+    `<p class="hint">문단 임베딩을 2-성분 PCA(power iteration)로 투영. 색 = 그룹, 모양 = 섹션. 문단 ${mapCount}개.${pcaNote ? " " + esc(pcaNote) : ""}</p>` +
     `<div class="scroll">${mapSvg}</div></section>` +
     `<section><h2>3. 통계 패널</h2>` +
     `<p class="hint">claim / hedge / voice 분포(전체), field 연도 히스토그램, style-profile 요약.</p>` +
@@ -687,7 +726,7 @@ document.querySelectorAll('.graph g > *').forEach(function(el){
           `${figuresHtml}</section>`
       : "") +
     `</main>` +
-    `<footer>paper-autopilot-open · corpus-report.mjs · 논문 ${counts && counts.papers != null ? counts.papers : "?"}편 / 문단 ${counts && counts.paragraphs != null ? counts.paragraphs : "?"}개 (own ${groups && groups.own || 0} · field ${groups && groups.field || 0}) · 완전 self-contained (외부 네트워크 참조 없음)</footer>` +
+    `<footer>paper-autopilot-open · corpus-report.mjs · 논문 ${counts && counts.papers != null ? counts.papers : "?"}편 / 문단 ${counts && counts.paragraphs != null ? counts.paragraphs : "?"}개 (own ${groups && groups.own || 0} · field ${groups && groups.field || 0} · review ${groups && groups.review || 0}) · 완전 self-contained (외부 네트워크 참조 없음)</footer>` +
     `<script>${js}</script>` +
     `</body></html>\n`
   );

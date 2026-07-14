@@ -84,9 +84,11 @@ async function main() {
   if (!group) die("--group own|field|review required");
   const force = !!opts.force;
 
-  // gemini benefits from taskType (RETRIEVAL_DOCUMENT on ingest / RETRIEVAL_QUERY
-  // on queries). openai/stub have no such concept -> null. Recorded in meta so
-  // retrieve.mjs can stay consistent (query with RETRIEVAL_QUERY only when set).
+  // Provider DEFAULT task type for document ingestion. gemini benefits from
+  // taskType (RETRIEVAL_DOCUMENT on ingest / RETRIEVAL_QUERY on queries);
+  // openai/stub have no such concept -> null. The EFFECTIVE task type used for
+  // this run's embeddings AND recorded in meta (corpusTaskType) is resolved
+  // against any existing corpus meta — see the task-type policy block below.
   const docTaskType = provider === "gemini" ? "RETRIEVAL_DOCUMENT" : null;
 
   // ---- provider/dimension consistency with any existing store -------------
@@ -215,6 +217,55 @@ async function main() {
     aitells = aitells.filter((a) => !rebuildIds.has(a.paperId));
   }
 
+  // ---- resolve the EFFECTIVE corpus task type ------------------------------
+  // Task-type policy:
+  //   (a) fresh corpus (no existing meta)   -> record the provider default
+  //       (RETRIEVAL_DOCUMENT for gemini; null for openai/stub).
+  //   (b) existing corpus WITH task_type    -> keep using the recorded value.
+  //   (c) existing corpus WITHOUT task_type -> LEGACY: its stored vectors were
+  //       embedded with no taskType. Preserve the absent state (null) AND embed
+  //       this run's additions WITHOUT taskType so stored/query embeddings stay
+  //       consistent. Never silently stamp RETRIEVAL_DOCUMENT here — retrieve.mjs
+  //       would then start querying with RETRIEVAL_QUERY against task-type-less
+  //       vectors (mismatch), and incremental builds would mix vector spaces.
+  //       A legacy corpus upgrades ONLY on a full re-embed: --force with input
+  //       covering every stored paper AND every stored figure-paper, i.e. no
+  //       legacy vector survives this run.
+  let corpusTaskType;
+  if (!existingMeta) {
+    corpusTaskType = docTaskType; // (a) fresh corpus
+  } else if (existingMeta.embedding && existingMeta.embedding.task_type) {
+    corpusTaskType = existingMeta.embedding.task_type; // (b) keep recorded value
+  } else {
+    corpusTaskType = null; // (c) legacy — preserve absent
+    if (force && docTaskType) {
+      // full re-embed check: all pre-existing papers purged above…
+      const paragraphPapersCovered = papers.length === 0;
+      // …and every stored figure-paper re-appears in this run's figure files.
+      let figurePapersCovered = true;
+      const existingFiguresForCheck = loadFigures(dir);
+      if (existingFiguresForCheck.length) {
+        const figIdsInRun = new Set();
+        for (const f of figureFiles) {
+          try {
+            const j = JSON.parse(fs.readFileSync(path.join(inputDir, f), "utf8"));
+            const id = j.paper_id || j.paperId;
+            if (id) figIdsInRun.add(id);
+          } catch {
+            /* parse errors are reported by the figure ingest loop below */
+          }
+        }
+        figurePapersCovered = existingFiguresForCheck.every((fg) => figIdsInRun.has(fg.paperId));
+      }
+      if (paragraphPapersCovered && figurePapersCovered) {
+        corpusTaskType = docTaskType;
+        process.stderr.write(
+          `legacy corpus fully re-embedded — recording task_type=${docTaskType}\n`
+        );
+      }
+    }
+  }
+
   // ---- embed new paragraphs ----------------------------------------------
   if (toEmbed.length) {
     process.stderr.write(`embedding ${toEmbed.length} paragraphs via ${provider} (${dimensions}d)…\n`);
@@ -225,7 +276,7 @@ async function main() {
       dimensions,
       apiKey,
       batchSize: 100,
-      taskType: docTaskType,
+      taskType: corpusTaskType,
       onProgress: (done, total) => process.stderr.write(`  embedded ${done}/${total}\r`),
     });
     process.stderr.write("\n");
@@ -258,7 +309,7 @@ async function main() {
     version: STORE_VERSION,
     created_at: existingMeta && existingMeta.created_at ? existingMeta.created_at : now,
     updated_at: now,
-    embedding: { provider, model: providerModel(provider), dimensions, task_type: docTaskType },
+    embedding: { provider, model: providerModel(provider), dimensions, task_type: corpusTaskType },
     counts: {
       papers: mergedPapers.length,
       paragraphs: mergedParagraphs.length,
@@ -378,7 +429,7 @@ async function main() {
         dimensions,
         apiKey,
         batchSize: 100,
-        taskType: docTaskType,
+        taskType: corpusTaskType,
         onProgress: (done, total) => process.stderr.write(`  embedded figs ${done}/${total}\r`),
       });
       process.stderr.write("\n");

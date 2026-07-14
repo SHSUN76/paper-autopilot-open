@@ -141,6 +141,8 @@ CREATE INDEX IF NOT EXISTS corpus_vocabulary_phrase_trgm  ON "CorpusVocabulary" 
 CREATE INDEX IF NOT EXISTS corpus_aitell_paper_idx      ON "CorpusAiTell" ("paperId");
 CREATE INDEX IF NOT EXISTS corpus_aitell_phrase_idx     ON "CorpusAiTell" (phrase);
 
+-- NOTE: 기존 vector(1024) 구스키마의 업그레이드는 전체 재적재 필요 — CREATE TABLE IF NOT EXISTS는 기존 컬럼 차원을 바꾸지 않는다.
+
 -- Vector cosine search index.
 -- NOTE: embeddings are vector(3072). pgvector's HNSW/IVFFlat indexes only
 -- support up to 2000 dimensions, so a vector(3072) column CANNOT be HNSW-indexed

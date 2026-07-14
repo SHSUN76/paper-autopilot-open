@@ -106,7 +106,23 @@ async function embedQuery(text, corpusMeta) {
         "Rebuild the corpus with the matching provider, or fix config.embedding.provider."
     );
   }
-  const dims = (corpusMeta && corpusMeta.embedding && corpusMeta.embedding.dimensions) || config.embedding.dimensions;
+  // Corpus/config dimension consistency (both backends). When the corpus meta
+  // records dimensions (local corpus-meta.json or supabase CorpusMeta row), the
+  // config MUST match it — whatever the value (1024-era supabase corpora keep
+  // working with a matching config; there is NO fixed-3072 assumption here).
+  const metaDims =
+    corpusMeta && corpusMeta.embedding && corpusMeta.embedding.dimensions != null
+      ? Number(corpusMeta.embedding.dimensions)
+      : null;
+  if (metaDims != null && metaDims !== Number(config.embedding.dimensions)) {
+    throw new Error(
+      `Embedding dimensions mismatch: corpus was built with ${metaDims}d but ` +
+        `config.embedding.dimensions=${config.embedding.dimensions}. ` +
+        `Set embedding.dimensions to ${metaDims} (corpus 생성 당시 값) — ` +
+        "차원을 바꾸려면 corpus 전체 재적재가 필요합니다."
+    );
+  }
+  const dims = metaDims || config.embedding.dimensions;
   const apiKey = providerApiKey(config, provider);
   // gemini taskType compat: only send RETRIEVAL_QUERY when the corpus was built
   // WITH a task_type recorded in meta. Corpora built before task_type existed
@@ -499,16 +515,12 @@ async function runSupabase() {
     process.exit(1);
   }
 
-  // The supabase schema fixes the embedding column to vector(3072). This is the
-  // schema-default guard; the per-query corpus/config cross-check (via the
-  // CorpusMeta row loaded in loadSupabaseMeta) still enforces the actual dims.
-  if (config.embedding.dimensions !== 3072) {
-    console.error(
-      `ERROR: supabase backend is fixed to vector(3072) but config.embedding.dimensions=${config.embedding.dimensions}. ` +
-        "Set embedding.dimensions to 3072, or use rag.mode='local'."
-    );
-    process.exit(1);
-  }
+  // Dimension policy: CorpusMeta is authoritative — there is NO fixed-3072
+  // pre-check here. The schema DEFAULT is vector(3072), but corpora created on
+  // the old vector(1024) schema must keep working: when a CorpusMeta row exists,
+  // embedQuery dies on any config/meta dims mismatch (whatever the value); when
+  // it does not (legacy schema), we proceed and wrap pgvector dimension errors
+  // with config guidance (see the catch below).
 
   // paperGroup is not stored in the supabase schema — --group cannot filter here.
   if (opts.group) {
@@ -528,6 +540,13 @@ async function runSupabase() {
   await client.connect();
   try {
     const corpusMeta = await loadSupabaseMeta(client);
+    if (!corpusMeta) {
+      console.error(
+        "WARN: cannot verify embedding dimensions (no CorpusMeta) — if a vector " +
+          "dimension error follows, set config embedding.dimensions to the value " +
+          "the corpus was originally ingested with (구 스키마는 1024였을 수 있음)."
+      );
+    }
     switch (cmd) {
       case "paragraphs":
         return await sbParagraphs(client, corpusMeta);
@@ -542,6 +561,17 @@ async function runSupabase() {
       case "move-transitions":
         return await sbMoveTransitions(client);
     }
+  } catch (e) {
+    // pgvector dimension mismatch (legacy schema without CorpusMeta, or manual
+    // schema edits) — rewrap with actionable config guidance.
+    if (e && /different vector dimensions|expected \d+ dimensions/i.test(e.message || "")) {
+      throw new Error(
+        e.message +
+          "\n  → config의 embedding.dimensions를 corpus 생성 당시 값으로 맞추세요 " +
+          "(차원 변경은 corpus 전체 재적재가 필요합니다)."
+      );
+    }
+    throw e;
   } finally {
     await client.end();
   }

@@ -881,6 +881,144 @@ check("figures-only figures_added == 1", s && s.figures_added === 1, s && "got "
 const figOnlyLines = fs.readFileSync(path.join(corpusFigOnly, "figures.jsonl"), "utf8").split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
 check("figures-only paperGroup == field (from --group fallback)", figOnlyLines.length === 1 && figOnlyLines[0].paperGroup === "field", figOnlyLines[0] && "got " + figOnlyLines[0].paperGroup);
 
+// === 21. codex review regressions (task_type / dims guard / PCA / review 색) ==
+
+// --- (a) legacy gemini corpus: task_type must stay absent -------------------
+// Simulate a corpus built BEFORE task_type existed: build with stub, then
+// hand-edit meta to provider=gemini with NO task_type key. An incremental
+// build where every paper skips (no embedding, no API key needed) must NOT
+// stamp RETRIEVAL_DOCUMENT into the meta.
+console.log("\n[task_type] legacy gemini corpus preservation");
+const corpusTT = path.join(work, "corpus_tt");
+const inTT = path.join(work, "in_tt");
+fs.mkdirSync(inTT, { recursive: true });
+fs.writeFileSync(
+  path.join(inTT, "tt2020.json"),
+  JSON.stringify({
+    paper_id: "tt2020",
+    source_file: "tt.pdf",
+    metadata: { title: "TT", journal: "J", year: 2020 },
+    paragraphs: [para("Introduction", 0, "motivation", "Task type preservation test paragraph for the legacy corpus scenario.")],
+  })
+);
+r = run(BUILD, ["--input", inTT, "--group", "own"], { PAO_CORPUS_DIR: corpusTT });
+check("tt build (stub) exits 0", r.code === 0, "code=" + r.code);
+const ttMetaPath = path.join(corpusTT, "corpus-meta.json");
+const ttMeta = json(fs.readFileSync(ttMetaPath, "utf8"));
+ttMeta.embedding.provider = "gemini";
+ttMeta.embedding.model = "gemini-embedding-001";
+delete ttMeta.embedding.task_type; // legacy: key entirely absent
+fs.writeFileSync(ttMetaPath, JSON.stringify(ttMeta, null, 2));
+r = run(BUILD, ["--input", inTT, "--group", "own"], { PAO_CORPUS_DIR: corpusTT, PAO_EMBED_PROVIDER: "gemini" });
+s = json(r.stdout);
+check("legacy incremental build exits 0", r.code === 0, "code=" + r.code);
+check("legacy incremental build all skipped", s && s.papers_skipped === 1, s && "got " + s.papers_skipped);
+const ttMeta2 = json(fs.readFileSync(ttMetaPath, "utf8"));
+check(
+  "legacy meta task_type stays absent (null) — NOT RETRIEVAL_DOCUMENT",
+  ttMeta2 && ttMeta2.embedding && ttMeta2.embedding.task_type == null,
+  "got " + JSON.stringify(ttMeta2 && ttMeta2.embedding && ttMeta2.embedding.task_type)
+);
+
+// Fresh gemini corpus (no pre-existing meta) records RETRIEVAL_DOCUMENT.
+// Empty-text paragraphs -> nothing to embed -> no API call needed.
+const corpusTTF = path.join(work, "corpus_ttf");
+const inTTF = path.join(work, "in_ttf");
+fs.mkdirSync(inTTF, { recursive: true });
+fs.writeFileSync(
+  path.join(inTTF, "ttf2021.json"),
+  JSON.stringify({
+    paper_id: "ttf2021",
+    source_file: "ttf.pdf",
+    metadata: { title: "TTF", journal: "J", year: 2021 },
+    paragraphs: [{ section_name: "Introduction", position_in_section: 0, text: "", primary_claim_type: "motivation", moves: [] }],
+  })
+);
+r = run(BUILD, ["--input", inTTF, "--group", "own"], { PAO_CORPUS_DIR: corpusTTF, PAO_EMBED_PROVIDER: "gemini" });
+check("fresh gemini build (no embeds) exits 0", r.code === 0, "code=" + r.code);
+const ttfMeta = json(fs.readFileSync(path.join(corpusTTF, "corpus-meta.json"), "utf8"));
+check(
+  "fresh gemini corpus records task_type=RETRIEVAL_DOCUMENT",
+  ttfMeta && ttfMeta.embedding && ttfMeta.embedding.task_type === "RETRIEVAL_DOCUMENT",
+  "got " + JSON.stringify(ttfMeta && ttfMeta.embedding && ttfMeta.embedding.task_type)
+);
+
+// --- (b) corpus/config dims consistency guard --------------------------------
+console.log("\n[dims] corpus/config dimension guard (no fixed-3072 assumption)");
+const corpusDimsT = path.join(work, "corpus_dims");
+r = run(BUILD, ["--input", inTT, "--group", "own"], { PAO_CORPUS_DIR: corpusDimsT, PAO_EMBED_DIMS: "512" });
+check("512d build exits 0", r.code === 0, "code=" + r.code);
+r = run(RETRIEVE, ["paragraphs", "--query", "task type", "--k", "2"], { PAO_CORPUS_DIR: corpusDimsT, PAO_EMBED_DIMS: "512" });
+data = json(r.stdout);
+check("retrieve with matching dims (512) exits 0", r.code === 0, "code=" + r.code);
+check("retrieve with matching dims returns rows", Array.isArray(data) && data.length > 0);
+r = run(RETRIEVE, ["paragraphs", "--query", "task type", "--k", "2"], { PAO_CORPUS_DIR: corpusDimsT, PAO_EMBED_DIMS: "3072" }, true);
+check("retrieve with mismatched dims (3072 vs 512) -> exit 1", r.code === 1, "code=" + r.code);
+check(
+  "mismatch message names corpus dims (512)",
+  (r.stderr || "").includes("512") && /dimensions mismatch/i.test(r.stderr || ""),
+  "stderr=" + (r.stderr || "").slice(0, 200)
+);
+// supabase hard 3072 guard removed: non-3072 config must now fail on the
+// missing connection string (i.e. it got PAST the old constant-based die).
+r = run(
+  RETRIEVE,
+  ["paragraphs", "--query", "x"],
+  { PAO_CORPUS_DIR: corpusDimsT, PAO_EMBED_DIMS: "512", PAO_RAG_MODE: "supabase", DIRECT_URL: "", DATABASE_URL: "" },
+  true
+);
+check("supabase 512d: old 'fixed to vector(3072)' guard is gone", !(r.stderr || "").includes("fixed to vector(3072)"), "stderr=" + (r.stderr || "").slice(0, 200));
+check("supabase 512d: fails on missing connection string instead", (r.stderr || "").includes("direct_url"), "stderr=" + (r.stderr || "").slice(0, 200));
+
+// --- (c) PCA downsampling on a large synthetic corpus ------------------------
+console.log("\n[report] PCA downsampling (5000 paragraphs)");
+const corpusBig = path.join(work, "corpus_big");
+const inBig = path.join(work, "in_big");
+fs.mkdirSync(inBig, { recursive: true });
+const bigParas = [];
+for (let i = 0; i < 5000; i++) {
+  bigParas.push({
+    section_name: i % 2 ? "Results" : "Introduction",
+    position_in_section: i,
+    text: "Paragraph number " + i + " discusses capacity retention and interphase stability in test cells.",
+    primary_claim_type: "evidence",
+    moves: [],
+  });
+}
+fs.writeFileSync(
+  path.join(inBig, "big2024.json"),
+  JSON.stringify({ paper_id: "big2024", source_file: "big.pdf", metadata: { title: "Big", journal: "J", year: 2024 }, paragraphs: bigParas })
+);
+r = run(BUILD, ["--input", inBig, "--group", "own"], { PAO_CORPUS_DIR: corpusBig });
+check("big corpus build exits 0", r.code === 0, "code=" + r.code);
+const t0 = Date.now();
+r = run(REPORT, [], { PAO_CORPUS_DIR: corpusBig });
+const reportMs = Date.now() - t0;
+const bigSummary = json(r.stdout);
+check("big report exits 0", r.code === 0, "code=" + r.code);
+check("big report covers all 5000 paragraphs in summary", bigSummary && bigSummary.paragraphs === 5000, bigSummary && "got " + bigSummary.paragraphs);
+const bigHtmlPath = bigSummary && bigSummary.out ? bigSummary.out : path.join(corpusBig, "corpus-report.html");
+const bigHtml = fs.existsSync(bigHtmlPath) ? fs.readFileSync(bigHtmlPath, "utf8") : "";
+check("big report shows PCA sampling note", bigHtml.includes("PCA 표본"), "note missing");
+check(
+  "big report sampling note says n=2000 / N=5000",
+  bigHtml.includes("n=2000") && bigHtml.includes("N=5000"),
+  (bigHtml.match(/PCA 표본[^<]*/) || [])[0]
+);
+check("big report generated in sane time (<60s incl. node startup)", reportMs < 60000, reportMs + "ms");
+
+// --- (d) review group colors + legend in the report ---------------------------
+console.log("\n[report] review group 3-color support");
+const figReportHtmlPath = path.join(corpusFig, "corpus-report.html");
+// regenerate against the current renderer (corpus_fig has a review paper).
+r = run(REPORT, [], figEnv);
+check("fig corpus report regenerates", r.code === 0, "code=" + r.code);
+const figHtml3 = fs.readFileSync(figReportHtmlPath, "utf8");
+check("report legend includes review swatch color #5aa469", figHtml3.includes("#5aa469"));
+check("report legend includes review label", figHtml3.includes("review (리뷰)"));
+check("report group table includes review row", figHtml3.includes("review 논문"));
+check("small corpus report has no PCA sampling note", !figHtml3.includes("PCA 표본"));
+
 // --- cleanup -----------------------------------------------------------------
 try { fs.rmSync(work, { recursive: true, force: true }); } catch {}
 
