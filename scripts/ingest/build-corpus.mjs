@@ -427,7 +427,15 @@ async function main() {
       }
 
       // --- methodology (independent incremental unit = paperId) ---
-      if (parsed.methodology && parsed.methodology.length) {
+      // Force overwrite contract: when --force reprocesses a paper whose
+      // updated report dropped (or emptied) its methodology block, the old
+      // records must still be purged — otherwise `methods` retrieval and the
+      // corpus report keep returning techniques the rebuild removed.
+      const hasNewMethods = !!(parsed.methodology && parsed.methodology.length);
+      if (force && existingMethodPaperIds.has(paperId) && !hasNewMethods) {
+        methRebuildIds.add(paperId); // purge below, nothing re-added
+        process.stderr.write(`purge methods (block removed): ${paperId}\n`);
+      } else if (hasNewMethods) {
         if (existingMethodPaperIds.has(paperId) && !force) {
           summary.methods_skipped += parsed.methodology.length;
           process.stderr.write(`skip methods (exists): ${paperId}\n`);

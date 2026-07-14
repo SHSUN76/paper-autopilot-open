@@ -1214,6 +1214,48 @@ check("meth --force methods_added == 5", s && s.methods_added === 5, s && "got "
 const methLines3 = fs.readFileSync(path.join(corpusMeth, "methodology.jsonl"), "utf8").split(/\r?\n/).filter((l) => l.trim());
 check("methodology.jsonl still 5 records after --force (no dupes)", methLines3.length === 5, "got " + methLines3.length);
 
+// codex P2 regression: --force with the methodology block REMOVED from the
+// report must purge the paper's stale records (force overwrite contract).
+const methaNoMeth = figMethReport(
+  "metha2024",
+  [fig("Fig1", 1, 1, ["electrochemical"], "performance", 2, "1x2", [{ label: "a", type: "line", summary: "capacity" }], "Cycling.", "Retention.", "Perf.", [], ["cycling"])],
+  [],
+  ""
+);
+delete methaNoMeth.methodology;
+fs.writeFileSync(path.join(inMethFigs, "metha2024.figures.json"), JSON.stringify(methaNoMeth));
+r = run(BUILD, ["--input", inMethFigs, "--group", "own", "--force"], methEnv);
+s = json(r.stdout);
+check("meth --force (block removed) exits 0", r.code === 0, "code=" + r.code);
+check("meth --force (block removed) emits purge note",
+  (r.stderr || "").includes("purge methods (block removed): metha2024"),
+  "stderr=" + (r.stderr || "").slice(-200));
+const methLines4 = fs.readFileSync(path.join(corpusMeth, "methodology.jsonl"), "utf8").split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
+check("metha2024 records purged after force w/o methodology",
+  methLines4.every((m) => m.paperId !== "metha2024"),
+  "paperIds=" + [...new Set(methLines4.map((m) => m.paperId))].join(","));
+check("methb2023 records intact after selective purge (3)",
+  methLines4.filter((m) => m.paperId === "methb2023").length === 3,
+  "got " + methLines4.filter((m) => m.paperId === "methb2023").length);
+// restore the original fixture so downstream sections keep 5 records
+fs.writeFileSync(
+  path.join(inMethFigs, "metha2024.figures.json"),
+  JSON.stringify(
+    figMethReport(
+      "metha2024",
+      [fig("Fig1", 1, 1, ["electrochemical"], "performance", 2, "1x2", [{ label: "a", type: "line", summary: "capacity" }], "Cycling.", "Retention.", "Perf.", [], ["cycling"])],
+      [
+        { technique: "operando XRD", category: "advanced", purpose: "충방전 중 상전이 실시간 추적", evidence_target: "mechanism: 용량 감쇠가 상전이 비가역성에서 온다는 주장의 직접 근거", figures: ["Fig3"], instrument_notes: "synchrotron beamline" },
+        { technique: "SEM", category: "standard", purpose: "입자 형상 확인", evidence_target: "coating morphology", figures: ["Fig1"] },
+      ],
+      "operando XRD로 상전이를 추적하고 SEM으로 형상을 보조 확인하는 전략."
+    )
+  )
+);
+r = run(BUILD, ["--input", inMethFigs, "--group", "own", "--force"], methEnv);
+s = json(r.stdout);
+check("meth fixture restored (methods_added == 5)", s && s.methods_added === 5, s && "got " + s.methods_added);
+
 // methods local-only in supabase mode
 console.log("\n[methodology] supabase mode -> local-only exit 1");
 r = run(RETRIEVE, ["methods", "--query", "x"], { ...methEnv, PAO_RAG_MODE: "supabase" }, true);
